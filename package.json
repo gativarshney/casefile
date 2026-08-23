@@ -1,0 +1,38 @@
+{
+  "name": "casefile",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An investigating verifier for payment fraud alerts: evidence-grounded, reproducible, tamper-evident.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "casefile": "./src/cli/index.ts"
+  },
+  "scripts": {
+    "casefile": "tsx src/cli/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check .",
+    "format": "biome check --write .",
+    "build": "tsc --project tsconfig.build.json",
+    "check": "npm run lint && npm run typecheck && npm run test"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "commander": "^15.0.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.10",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^22.15.0",
+    "fast-check": "^4.9.0",
+    "tsx": "^4.23.12",
+    "typescript": "5.9.3",
+    "vitest": "^4.1.11"
+  }
+}
