@@ -54,20 +54,65 @@ npm install
 npm test
 ```
 
+### Walking a case end to end
+
+Generate a world, triage an alert, and verify the sealed case:
+
 ```bash
-npm run casefile -- --help
+npm run casefile -- generate --out data/dev
 ```
+
+```bash
+npm run casefile -- alerts --data data/dev
+```
+
+```bash
+npm run casefile -- investigate --data data/dev --out artifacts
+```
+
+```bash
+npm run casefile -- replay artifacts/<case>.json --data data/dev
+```
+
+Replay reproduces the evidence set, the findings, the score and the verdict, and
+recomputes the hash of every source record the case relied on. To see it fail, change a
+single row underneath a sealed case and replay again:
+
+```bash
+node -e "new (require('better-sqlite3'))('data/dev/world.db').prepare('UPDATE transactions SET amountMinor=? WHERE txnId=?').run(999900,'txn_f0001_005')"
+```
+
+Replay then stops with an integrity failure naming the record, the sealed digest and the
+digest the row now produces, and exits non-zero.
 
 ## Repository layout
 
 ```
 src/
   canon/      canonical serialisation, hashing, Merkle roots, hash chains
-  world/      the synthetic payment environment and its store
+  world/      the synthetic payment environment, its store and its generator
+  alerting/   the upstream rules engine whose output Casefile triages
+  evidence/   evidence and finding schemas, with provenance back to source rows
+  probes/     pure functions that gather evidence about a subject
+  verify/     findings to score to action
+  case/       sealed, hash-chained case artifacts
+  replay/     re-execution and integrity verification
   cli/        the casefile command line interface
-tests/        unit and property-based tests
-tools/        offline development utilities, not part of the runtime
+tests/        unit, property-based and end-to-end tests
 ```
+
+## Current status
+
+The end-to-end path — generate, alert, investigate, seal, replay, verify — works and is
+covered by tests. What exists today is a deliberately small vertical slice, built to
+prove the architecture before the substantial work goes on top of it.
+
+Not yet built: the realistic correlated payment environment, the remaining fraud
+families and their hard negatives, the entity-disjoint held-out evaluation, and the
+fitted scorer. Until that scorer lands, the verifier combines findings using **declared
+constant weights**, and its output is reported as a bounded index rather than a
+probability. No precision or recall figure is claimed yet, because none has been
+measured on a held-out set.
 
 ## Notes on the numeric model
 
