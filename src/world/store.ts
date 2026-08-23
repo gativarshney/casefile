@@ -179,6 +179,20 @@ export class WorldReader {
     return row.n;
   }
 
+  recordTypeFor(table: string): ErasedRecordType {
+    const type = this.types.find((candidate) => candidate.table === table);
+    if (!type) throw new StoreError(`${table} is not a table of this store`);
+    return type;
+  }
+
+  /** Schema-validated row without knowing its concrete type, for generic hash checks. */
+  rawRecord(type: ErasedRecordType, key: string): Record<string, unknown> | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM ${type.table} WHERE ${type.primaryKey} = ?`)
+      .get(key) as Record<string, unknown> | undefined;
+    return row ? type.parseUnknown(restoreTypes(type, row)) : undefined;
+  }
+
   /**
    * Recomputes every table root from the rows themselves rather than reading the stored
    * `record_hash` column, so a forgery that updates both the row and its digest still
