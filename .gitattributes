@@ -1,0 +1,18 @@
+# A CRLF surviving into a committed fixture would change its digest on one platform
+# and not another.
+* text=auto eol=lf
+
+# Fixtures are compared byte-for-byte; no filter or autocrlf setting may rewrite them.
+*.json text eol=lf
+tools/reference/*.json -text
+
+# Binary
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.db binary
+*.sqlite binary
+
+package-lock.json linguist-generated=true -diff
