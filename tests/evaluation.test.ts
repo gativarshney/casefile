@@ -244,3 +244,30 @@ describe("the evaluation is worth believing", () => {
     expect(report.autoDecisionRate).toBeGreaterThan(0.5);
   });
 });
+
+describe("the headline number cannot overstate the system", () => {
+  it("end-to-end block rate accounts for fraud that never reaches the queue", () => {
+    const e2e = report.endToEnd;
+    expect(e2e.fraudReachingQueue).toBeLessThanOrEqual(e2e.fraudInWorld);
+    expect(e2e.fraudBlocked).toBeLessThanOrEqual(e2e.fraudReachingQueue);
+    // Triage precision is measured on the queue; end-to-end recall includes everything
+    // the alerting layer missed, so it must be the more conservative figure.
+    expect(e2e.endToEndBlockRate).toBeLessThanOrEqual(report.casefile.recall + 1e-9);
+  });
+
+  it("reports the mechanisms that evade alerting entirely", () => {
+    const invisible = report.endToEnd.invisibleToAlerting.filter(
+      (cohort) => cohort.count >= 5 && cohort.catchRate < 0.2,
+    );
+    // Friendly fraud is expected here: nothing distinguishes it at authorisation time.
+    expect(invisible.some((cohort) => cohort.name.startsWith("friendly_fraud"))).toBe(true);
+  });
+
+  it("every mechanism present in the world is accounted for", () => {
+    const total = report.endToEnd.invisibleToAlerting.reduce(
+      (sum, cohort) => sum + cohort.count,
+      0,
+    );
+    expect(total).toBe(report.endToEnd.fraudInWorld);
+  });
+});

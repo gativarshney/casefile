@@ -51,6 +51,24 @@ export interface CohortResult {
   readonly catchRate: number;
 }
 
+/**
+ * What the whole pipeline achieves, not just the triage stage.
+ *
+ * Triage metrics are computed over the alert queue, so fraud the upstream rules engine
+ * never flags is invisible to them. Reporting end-to-end recall alongside keeps the
+ * headline honest: a mechanism that evades alerting is not caught by anything
+ * downstream, however good the verifier is.
+ */
+export interface EndToEndResult {
+  readonly fraudInWorld: number;
+  readonly fraudReachingQueue: number;
+  readonly fraudBlocked: number;
+  readonly fraudNotCleared: number;
+  readonly alertingRecall: number;
+  readonly endToEndBlockRate: number;
+  readonly invisibleToAlerting: readonly CohortResult[];
+}
+
 export interface EvaluationReport {
   readonly world: string;
   readonly worldRoot: string;
@@ -66,6 +84,7 @@ export interface EvaluationReport {
    * both framings are reported and neither is allowed to stand alone.
    */
   readonly casefileCaught: ClassificationMetrics;
+  readonly endToEnd: EndToEndResult;
   readonly prAuc: number;
   readonly calibration: CalibrationReport;
   readonly baselines: readonly BaselineResult[];
@@ -143,6 +162,10 @@ export function evaluate(
   const totalTransactions = reader.count(TRANSACTIONS.table);
   reader.close();
 
+  const labelReader = new LabelReader(labelsPath);
+  const allFraud = labelReader.all(TRANSACTION_LABELS).filter((label) => label.isFraud);
+  labelReader.close();
+
   const actual = scored.map((row) => row.isFraud);
   // Confirm is the positive prediction: it is the action that blocks a payment.
   const predicted = scored.map((row) => row.action === "confirm");
@@ -179,6 +202,7 @@ export function evaluate(
     fraudInAlerts: actual.filter(Boolean).length,
     casefile,
     casefileCaught: caught,
+    endToEnd: endToEndResult(allFraud, scored),
     prAuc: prAuc(
       scored.map((row) => row.probability),
       actual,
@@ -310,4 +334,55 @@ function decoyFalsePositives(scored: readonly ScoredAlert[]): CohortResult[] {
       catchRate: group.caught / group.count,
     }))
     .sort((a, b) => b.blockRate - a.blockRate);
+}
+
+/**
+ * Fraud never surfaced by the alerting layer, grouped by mechanism. A variant that
+ * appears here defeated the pipeline before triage had anything to decide.
+ */
+function endToEndResult(
+  allFraud: readonly TransactionLabel[],
+  scored: readonly ScoredAlert[],
+): EndToEndResult {
+  const scoredByTxn = new Map(scored.map((row) => [row.txnId, row]));
+  const groups = new Map<string, { count: number; blocked: number; caught: number }>();
+
+  let blocked = 0;
+  let notCleared = 0;
+  let reached = 0;
+
+  for (const label of allFraud) {
+    const row = scoredByTxn.get(label.txnId);
+    if (row) {
+      reached += 1;
+      if (row.action === "confirm") blocked += 1;
+      if (row.action !== "clear") notCleared += 1;
+    }
+    const name = `${label.family}/${label.variant}`;
+    const group = groups.get(name) ?? { count: 0, blocked: 0, caught: 0 };
+    group.count += 1;
+    if (row) group.caught += 1;
+    if (row?.action === "confirm") group.blocked += 1;
+    groups.set(name, group);
+  }
+
+  return {
+    fraudInWorld: allFraud.length,
+    fraudReachingQueue: reached,
+    fraudBlocked: blocked,
+    fraudNotCleared: notCleared,
+    alertingRecall: reached / Math.max(1, allFraud.length),
+    endToEndBlockRate: blocked / Math.max(1, allFraud.length),
+    invisibleToAlerting: [...groups.entries()]
+      .map(([name, group]) => ({
+        name,
+        count: group.count,
+        blocked: group.blocked,
+        caught: group.caught,
+        blockRate: group.blocked / group.count,
+        // Here "caught" means reached the queue at all.
+        catchRate: group.caught / group.count,
+      }))
+      .sort((a, b) => a.catchRate - b.catchRate),
+  };
 }

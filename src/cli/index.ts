@@ -12,7 +12,7 @@ import { buildTrainingSet, trainModel, writeModel } from "../eval/train.js";
 import { ReplayMismatchError, replayCase } from "../replay/replay.js";
 import { type FrozenModel, loadModel } from "../scoring/model.js";
 import { decisionBoundaries } from "../verify/policy.js";
-import { developmentSpec, generateWorld } from "../world/generate/index.js";
+import { developmentSpec, generateWorld, heldoutSpec } from "../world/generate/index.js";
 import { type DatasetManifest, IntegrityError, WorldReader } from "../world/store.js";
 
 const packageJson = JSON.parse(
@@ -43,10 +43,16 @@ const program = new Command()
 
 program
   .command("generate")
-  .description("Generate the synthetic development payment world")
+  .description("Generate a synthetic payment world")
   .option("-o, --out <directory>", "output directory", DEFAULT_DATA_DIR)
-  .action((options: { out: string }) => {
-    const result = generateWorld({ spec: developmentSpec(), outputDirectory: options.out });
+  .option(
+    "--heldout",
+    "generate the held-out world instead: a different seed, a later window, disjoint " +
+      "identifiers, and two attack mechanisms absent from development",
+  )
+  .action((options: { out: string; heldout?: boolean }) => {
+    const spec = options.heldout ? heldoutSpec() : developmentSpec();
+    const result = generateWorld({ spec, outputDirectory: options.out });
     process.stdout.write(`world      ${result.worldPath}\n`);
     process.stdout.write(`labels     ${result.labelsPath}\n`);
     process.stdout.write(`manifest   ${result.manifestPath}\n`);

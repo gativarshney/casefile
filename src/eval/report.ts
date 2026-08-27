@@ -32,6 +32,24 @@ export function formatEvaluation(report: EvaluationReport): string {
     `  confusion        TP ${c.truePositives}  FP ${c.falsePositives}  TN ${c.trueNegatives}  FN ${c.falseNegatives}`,
   );
 
+  const e2e = report.endToEnd;
+  lines.push("", "END TO END — every fraudulent transaction in the world, not just alerted ones");
+  lines.push(`  fraud in world       ${e2e.fraudInWorld}`);
+  lines.push(
+    `  reached the queue    ${e2e.fraudReachingQueue} (${percent(e2e.alertingRecall)} — the rest never reach triage)`,
+  );
+  lines.push(`  blocked end to end   ${e2e.fraudBlocked} (${percent(e2e.endToEndBlockRate)})`);
+  lines.push("  by mechanism, ordered by how much reaches the queue at all:");
+  lines.push(
+    `    ${"mechanism".padEnd(34)}${"n".padStart(5)}${"alerted".padStart(10)}${"blocked".padStart(10)}`,
+  );
+  for (const cohort of e2e.invisibleToAlerting) {
+    lines.push(
+      `    ${cohort.name.padEnd(34)}${String(cohort.count).padStart(5)}` +
+        `${percent(cohort.catchRate).padStart(10)}${percent(cohort.blockRate).padStart(10)}`,
+    );
+  }
+
   lines.push("", "ACTIONS");
   lines.push(`  confirm          ${report.actionCounts.confirm}`);
   lines.push(`  escalate         ${report.actionCounts.escalate}`);
