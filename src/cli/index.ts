@@ -1,11 +1,13 @@
 #!/usr/bin/env -S npx tsx
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { raiseAlerts } from "../alerting/rules.js";
 import { type CaseArtifact, investigate, readCase, writeCase } from "../case/artifact.js";
+import { evaluate } from "../eval/evaluate.js";
 import { formatReport, inspectWorld } from "../eval/inspect.js";
+import { formatEvaluation } from "../eval/report.js";
 import { buildTrainingSet, trainModel, writeModel } from "../eval/train.js";
 import { ReplayMismatchError, replayCase } from "../replay/replay.js";
 import { type FrozenModel, loadModel } from "../scoring/model.js";
@@ -98,6 +100,41 @@ program
       .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
     for (const [name, value] of ranked) {
       process.stdout.write(`  ${name.padEnd(36)}${value >= 0 ? "+" : ""}${value.toFixed(4)}\n`);
+    }
+  });
+
+program
+  .command("evaluate")
+  .description("Measure triage performance against ground truth")
+  .option("-d, --data <directory>", "world directory", DEFAULT_DATA_DIR)
+  .option("-m, --model <path>", "frozen model", DEFAULT_MODEL_PATH)
+  .option("--json <path>", "also write the full report as JSON")
+  .action((options: { data: string; model: string; json?: string }) => {
+    const model = requireModel(options.model);
+    const manifest = JSON.parse(
+      readFileSync(join(options.data, "dataset_manifest.json"), "utf8"),
+    ) as DatasetManifest & { provenance: Record<string, string> };
+
+    const report = evaluate(
+      join(options.data, "world.db"),
+      join(options.data, "labels.db"),
+      manifest,
+      model,
+      String(manifest.provenance.spec ?? options.data),
+    );
+    process.stdout.write(`${formatEvaluation(report)}
+`);
+    if (options.json) {
+      mkdirSync(dirname(options.json), { recursive: true });
+      writeFileSync(
+        options.json,
+        `${JSON.stringify(report, null, 2)}
+`,
+        "utf8",
+      );
+      process.stdout.write(`
+report written to ${options.json}
+`);
     }
   });
 
