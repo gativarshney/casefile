@@ -84,20 +84,3 @@ export function splitByComponent(reader: WorldReader, calibrateShare = 0.3): Map
   }
   return assignment;
 }
-
-export interface SplitSummary {
-  readonly fit: number;
-  readonly calibrate: number;
-  readonly components: number;
-  readonly largestComponent: number;
-}
-
-export function summariseSplit(assignment: ReadonlyMap<string, Fold>): SplitSummary {
-  let fit = 0;
-  let calibrate = 0;
-  for (const fold of assignment.values()) {
-    if (fold === "fit") fit += 1;
-    else calibrate += 1;
-  }
-  return { fit, calibrate, components: 0, largestComponent: 0 };
-}

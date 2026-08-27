@@ -81,23 +81,6 @@ export function counted<T>(items: readonly T[], key: (item: T) => string): Map<s
   }
   return counts;
 }
-
-export function histogram(values: readonly number[], buckets: readonly number[]): number[] {
-  const counts = new Array<number>(buckets.length + 1).fill(0);
-  for (const value of values) {
-    let placed = false;
-    for (const [index, edge] of buckets.entries()) {
-      if (value < edge) {
-        counts[index] = (counts[index] as number) + 1;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) counts[buckets.length] = (counts[buckets.length] as number) + 1;
-  }
-  return counts;
-}
-
 /**
  * Divergence expected purely from drawing `sampleSize` observations out of `reference`.
  *

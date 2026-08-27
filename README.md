@@ -353,7 +353,7 @@ src/
   cli/        the casefile command line interface
 web/          the investigation console
 tools/        offline reference-fixture generation, not part of the runtime
-tests/        249 tests: unit, property-based, end-to-end
+tests/        252 tests: unit, property-based, end-to-end
 ```
 
 ## Notes on the numerics
