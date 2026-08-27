@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { raiseAlerts } from "../alerting/rules.js";
 import { type CaseArtifact, investigate, readCase, writeCase } from "../case/artifact.js";
+import { formatReport, inspectWorld } from "../eval/inspect.js";
 import { ReplayMismatchError, replayCase } from "../replay/replay.js";
 import { developmentSpec, generateWorld } from "../world/generate/index.js";
 import { type DatasetManifest, IntegrityError, WorldReader } from "../world/store.js";
@@ -40,6 +41,17 @@ program
     for (const [table, count] of Object.entries(result.counts)) {
       process.stdout.write(`  ${table.padEnd(18)}${count}\n`);
     }
+  });
+
+program
+  .command("inspect")
+  .description("Report distributions and check the world for synthetic shortcuts")
+  .option("-d, --data <directory>", "world directory", DEFAULT_DATA_DIR)
+  .action((options: { data: string }) => {
+    const report = inspectWorld(join(options.data, "world.db"), join(options.data, "labels.db"));
+    process.stdout.write(`${formatReport(report)}
+`);
+    if (!report.passed) process.exitCode = 5;
   });
 
 program
