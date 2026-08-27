@@ -103,14 +103,14 @@ export function developmentSpec(): WorldSpec {
     startAtMs: EPOCH_MS,
     days: 90,
     archetypes: {
-      casual: 300,
+      casual: 250,
       powerUser: 105,
       reseller: 55,
       traveller: 65,
       households: 30,
       campuses: 3,
       studentsPerCampus: [22, 32],
-      newCustomer: 65,
+      newCustomer: 130,
       subscriber: 55,
     },
     fraud: {
@@ -118,7 +118,7 @@ export function developmentSpec(): WorldSpec {
       cardTestingSlowLow: 0,
       atoCredentialStuffing: 28,
       atoSessionHijack: 17,
-      ringSharedInfrastructure: 10,
+      ringSharedInfrastructure: 20,
       ringTimingOnly: 0,
       friendlyBuyersRemorse: 40,
       friendlyFamilyMember: 20,
@@ -147,14 +147,14 @@ export function heldoutSpec(): WorldSpec {
     startAtMs: EPOCH_MS + 97 * DAY_MS,
     days: 45,
     archetypes: {
-      casual: 170,
+      casual: 140,
       powerUser: 55,
       reseller: 30,
       traveller: 38,
       households: 17,
       campuses: 2,
       studentsPerCampus: [20, 30],
-      newCustomer: 40,
+      newCustomer: 78,
       subscriber: 30,
     },
     fraud: {
@@ -162,8 +162,8 @@ export function heldoutSpec(): WorldSpec {
       cardTestingSlowLow: 8,
       atoCredentialStuffing: 12,
       atoSessionHijack: 8,
-      ringSharedInfrastructure: 5,
-      ringTimingOnly: 4,
+      ringSharedInfrastructure: 10,
+      ringTimingOnly: 7,
       friendlyBuyersRemorse: 22,
       friendlyFamilyMember: 12,
     },
@@ -175,6 +175,49 @@ export function heldoutSpec(): WorldSpec {
       newDeviceOnHoliday: 9,
     },
     noise: DEFAULT_NOISE,
+  };
+}
+
+/**
+ * Large enough for distribution checks to be meaningful, small enough to generate
+ * inside a test run. Quality thresholds are statistical and say nothing useful about a
+ * fifty-customer world.
+ */
+export function qualitySpec(): WorldSpec {
+  const dev = developmentSpec();
+  return {
+    ...dev,
+    name: "quality",
+    idNamespace: "q",
+    days: 60,
+    archetypes: {
+      casual: 120,
+      powerUser: 45,
+      reseller: 24,
+      traveller: 28,
+      households: 12,
+      campuses: 2,
+      studentsPerCampus: [18, 26],
+      newCustomer: 55,
+      subscriber: 24,
+    },
+    fraud: {
+      cardTestingBurst: 12,
+      cardTestingSlowLow: 0,
+      atoCredentialStuffing: 12,
+      atoSessionHijack: 7,
+      ringSharedInfrastructure: 8,
+      ringTimingOnly: 0,
+      friendlyBuyersRemorse: 16,
+      friendlyFamilyMember: 8,
+    },
+    decoys: {
+      vpnUsers: 10,
+      cardReissues: 9,
+      giftsToNewAddress: 10,
+      firstPurchaseHighValue: 9,
+      newDeviceOnHoliday: 7,
+    },
   };
 }
 

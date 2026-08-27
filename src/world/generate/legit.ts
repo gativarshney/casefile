@@ -45,25 +45,29 @@ const SHIPPED_CATEGORIES: ReadonlySet<string> = new Set([
 ]);
 
 const CASUAL_MIX: CategoryMix = [
-  ["grocery", 25],
-  ["food_delivery", 25],
-  ["fashion", 15],
-  ["utilities", 15],
-  ["electronics", 8],
-  ["subscription", 5],
-  ["travel", 4],
-  ["gaming", 3],
+  ["food_delivery", 20],
+  ["grocery", 18],
+  ["wallet_topup", 16],
+  ["utilities", 11],
+  ["fashion", 10],
+  ["gift_cards", 8],
+  ["gaming", 7],
+  ["electronics", 6],
+  ["subscription", 2],
+  ["travel", 2],
 ];
 
 const POWER_MIX: CategoryMix = [
-  ["food_delivery", 20],
-  ["grocery", 18],
-  ["electronics", 15],
-  ["fashion", 15],
-  ["travel", 10],
-  ["gaming", 8],
-  ["utilities", 8],
-  ["subscription", 6],
+  ["food_delivery", 17],
+  ["grocery", 14],
+  ["wallet_topup", 14],
+  ["electronics", 12],
+  ["gift_cards", 11],
+  ["gaming", 10],
+  ["fashion", 10],
+  ["travel", 6],
+  ["utilities", 4],
+  ["subscription", 2],
 ];
 
 const RESELLER_MIX: CategoryMix = [
@@ -76,22 +80,25 @@ const RESELLER_MIX: CategoryMix = [
 ];
 
 const STUDENT_MIX: CategoryMix = [
-  ["food_delivery", 30],
-  ["gaming", 20],
-  ["subscription", 15],
-  ["fashion", 15],
-  ["grocery", 10],
-  ["wallet_topup", 10],
+  ["food_delivery", 25],
+  ["wallet_topup", 20],
+  ["gaming", 18],
+  ["gift_cards", 12],
+  ["fashion", 10],
+  ["subscription", 8],
+  ["grocery", 7],
 ];
 
 const TRAVELLER_MIX: CategoryMix = [
-  ["travel", 30],
-  ["food_delivery", 20],
-  ["fashion", 15],
-  ["grocery", 10],
-  ["electronics", 10],
-  ["utilities", 8],
-  ["subscription", 7],
+  ["travel", 22],
+  ["food_delivery", 18],
+  ["wallet_topup", 14],
+  ["fashion", 12],
+  ["gift_cards", 10],
+  ["electronics", 9],
+  ["grocery", 8],
+  ["gaming", 5],
+  ["utilities", 2],
 ];
 
 interface PersonOptions {
@@ -114,7 +121,7 @@ export function setupPerson(
   const [tenureMin, tenureMax] = options.tenureDays ?? [120, 900];
   const tenureDays = rng.int(tenureMin, tenureMax);
   const signupAtMs = b.spec.startAtMs - tenureDays * DAY_MS;
-  const [kycMin, kycMax] = options.kyc ?? [1, 2];
+  const [kycMin, kycMax] = options.kyc ?? [0, 2];
 
   const customer = b.addCustomer(path, {
     signupAtMs,
@@ -124,24 +131,36 @@ export function setupPerson(
     kycLevel: rng.int(kycMin, kycMax),
   });
 
-  const [cardMin, cardMax] = options.cards ?? [1, 2];
+  const [cardMin, cardMax] = options.cards ?? [2, 3];
   const cardIds: string[] = [];
-  for (let c = 0; c < rng.int(cardMin, cardMax); c += 1) {
-    cardIds.push(
-      b.addCard(
-        [...path, "card", c],
-        rng,
-        customer.customerId,
-        signupAtMs + rng.int(1, 40) * DAY_MS,
-      ).cardId,
-    );
+  const cardCount = rng.int(cardMin, cardMax);
+  for (let c = 0; c < cardCount; c += 1) {
+    // Genuine customers add instruments throughout their life, so a recently added card
+    // is ordinary rather than diagnostic. The first card must predate any spending.
+    const addedAtMs =
+      c > 0 && rng.chance(6_500)
+        ? b.spec.startAtMs + rng.int(0, b.spec.days - 1) * DAY_MS
+        : signupAtMs + rng.int(1, 40) * DAY_MS;
+    cardIds.push(b.addCard([...path, "card", c], rng, customer.customerId, addedAtMs).cardId);
   }
 
   const [devMin, devMax] = options.devices ?? [1, 2];
   const deviceIds: string[] = [];
-  for (let d = 0; d < rng.int(devMin, devMax); d += 1) {
+  const deviceCount = rng.int(devMin, devMax);
+  for (let d = 0; d < deviceCount; d += 1) {
+    const firstSeen =
+      d === 0
+        ? signupAtMs + rng.int(0, 30) * DAY_MS
+        : signupAtMs + rng.int(30, Math.max(31, tenureDays + b.spec.days)) * DAY_MS;
+    deviceIds.push(b.addDevice([...path, "device", d], rng, firstSeen).deviceId);
+  }
+  if (rng.chance(2_800)) {
     deviceIds.push(
-      b.addDevice([...path, "device", d], rng, signupAtMs + rng.int(0, 30) * DAY_MS).deviceId,
+      b.addDevice(
+        [...path, "device", "replacement"],
+        rng,
+        b.spec.startAtMs + rng.int(0, b.spec.days - 1) * DAY_MS,
+      ).deviceId,
     );
   }
 
@@ -261,6 +280,9 @@ export function emitPurchase(
     });
   }
 
+  const usableCards = b.cardsAvailableAt(person.cardIds, atMs);
+  if (usableCards.length === 0) return;
+
   const txnCount = rng.chance(2_500) ? 2 : 1;
   for (let t = 0; t < txnCount; t += 1) {
     const [factorMin, factorMax] = life.factor;
@@ -269,7 +291,7 @@ export function emitPurchase(
     emitTransaction(b, person, [...path, "txn", t], rng, {
       session,
       merchant,
-      cardId: rng.pick(person.cardIds),
+      cardId: rng.pick(usableCards),
       atMs: atMs + t * rng.int(1, 4) * MINUTE_MS,
       amountMinor,
       shippingCity:
@@ -629,6 +651,8 @@ function buildSubscribers(b: WorldBuilder): Person[] {
       for (let day = chargeDay; day < b.spec.days; day += 30) {
         const atMs =
           b.spec.startAtMs + day * DAY_MS + chargeHour * HOUR_MS + rng.int(0, 30) * MINUTE_MS;
+        const usable = b.cardsAvailableAt(person.cardIds, atMs);
+        if (usable.length === 0) continue;
         const session = b.addSession([...person.path, "sub", s, "cycle", day], {
           customerId: person.customerId,
           deviceId: person.deviceIds[0] as string,
@@ -641,7 +665,7 @@ function buildSubscribers(b: WorldBuilder): Person[] {
           [...person.path, "sub", s, "txn", day],
           {
             customerId: person.customerId,
-            cardId: person.cardIds[0] as string,
+            cardId: usable[0] as string,
             merchantId: merchant.merchantId,
             sessionId: session.sessionId,
             atMs,

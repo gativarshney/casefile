@@ -3,6 +3,14 @@ import type { FraudFamily, FraudVariant } from "../labels.js";
 import type { Merchant } from "../schema.js";
 import type { WorldBuilder } from "./builder.js";
 import { HIGH_LIQUIDITY } from "./catalog.js";
+
+const SHIPPED_CATEGORIES: ReadonlySet<string> = new Set([
+  "electronics",
+  "fashion",
+  "grocery",
+  "food_delivery",
+]);
+
 import { DAY_MS, HOUR_MS, MINUTE_MS } from "./config.js";
 import type { LegitimatePopulation, Person } from "./legit.js";
 
@@ -72,20 +80,36 @@ function cardTesting(
   const city = b.pickCity(rng);
   const merchants = liquidMerchants(b);
   const attempts = variant === "burst" ? rng.int(10, 18) : rng.int(28, 46);
-  const startMs = b.spec.startAtMs + rng.int(2, b.spec.days - 12) * DAY_MS;
+  const startDay = rng.int(2, b.spec.days - 12);
+  const startMs = b.sampleDayTime(rng, b.spec.startAtMs + startDay * DAY_MS);
 
+  // Aged, KYC-passed accounts are bought as readily as fresh ones; account age must not
+  // be a proxy for the label.
+  const accountAgeDays = rng.weighted([
+    [rng.int(0, 10), 25],
+    [rng.int(20, 160), 30],
+    [rng.int(160, 500), 25],
+    [rng.int(500, 900), 20],
+  ]);
   const customerId = b.addCustomer(path, {
-    signupAtMs: startMs - rng.int(1, 6) * HOUR_MS,
+    signupAtMs: startMs - accountAgeDays * DAY_MS - rng.int(1, 20) * HOUR_MS,
     homeCountry: "IN",
     homeCity: city.name,
     emailDomain: b.pickEmailDomain(rng),
-    kycLevel: 0,
+    kycLevel: rng.weighted([
+      [0, 55],
+      [1, 30],
+      [2, 15],
+    ]),
   }).customerId;
   b.labelEntity("customer", customerId, "fraudster", ctx.scenarioId);
 
+  const deviceAgeDays = rng.int(0, 400);
   const burstDevice =
     variant === "burst"
-      ? b.addDevice([...path, "device"], rng, startMs, { automationSignals: rng.chance(6_000) })
+      ? b.addDevice([...path, "device"], rng, startMs - deviceAgeDays * DAY_MS, {
+          automationSignals: rng.chance(6_000),
+        })
       : null;
   const burstIp = variant === "burst" ? b.homeIp([...path, "ip"], rng, city) : null;
 
@@ -95,11 +119,11 @@ function cardTesting(
     const atMs =
       variant === "burst"
         ? startMs + a * attemptRng.int(20, 90) * 1_000
-        : startMs + Math.floor(a / 5) * DAY_MS + (a % 5) * attemptRng.int(2, 6) * HOUR_MS;
+        : b.sampleDayTime(attemptRng, b.spec.startAtMs + (startDay + Math.floor(a / 5)) * DAY_MS);
 
     const device =
       burstDevice ??
-      b.addDevice([...path, "device", a], attemptRng, atMs, {
+      b.addDevice([...path, "device", a], attemptRng, atMs - attemptRng.int(0, 300) * DAY_MS, {
         automationSignals: attemptRng.chance(3_000),
       });
     const ip = burstIp ?? b.homeIp([...path, "ip", a], attemptRng, b.pickCity(attemptRng));
@@ -108,15 +132,21 @@ function cardTesting(
       customerId,
       deviceId: device.deviceId,
       ipId: ip.ipId,
-      startedAtMs: atMs - MINUTE_MS,
-      endedAtMs: atMs + MINUTE_MS,
+      startedAtMs: atMs - attemptRng.int(2, 15) * MINUTE_MS,
+      endedAtMs: atMs + attemptRng.int(1, 10) * MINUTE_MS,
       channel: "web",
     });
 
-    const card = b.addCard([...path, "card", a], attemptRng, customerId, atMs, {
-      funding: "credit",
-      issuerCountry: attemptRng.chance(2_500) ? attemptRng.pick(["US", "GB", "AE"]) : "IN",
-    });
+    const card = b.addCard(
+      [...path, "card", a],
+      attemptRng,
+      customerId,
+      atMs - attemptRng.int(0, 620) * DAY_MS,
+      {
+        funding: "credit",
+        issuerCountry: attemptRng.chance(2_500) ? attemptRng.pick(["US", "GB", "AE"]) : "IN",
+      },
+    );
 
     const succeeded = a >= successIndex;
     const merchant = attemptRng.pick(merchants);
@@ -128,7 +158,9 @@ function cardTesting(
         merchantId: merchant.merchantId,
         sessionId: session.sessionId,
         atMs,
-        amountMinor: succeeded ? attemptRng.int(1_500, 6_000) * 100 : attemptRng.int(1, 6) * 100,
+        amountMinor: succeeded
+          ? attemptRng.lognormalInt(merchant.avgTicketMinor, 0.55, 2_000)
+          : attemptRng.int(1, 6) * 100,
         status: succeeded ? "captured" : "declined",
         declineReason: succeeded
           ? null
@@ -138,7 +170,12 @@ function cardTesting(
               ["suspected_fraud", 12],
               ["expired_card", 8],
             ]),
-        avsResult: succeeded ? "unavailable" : "fail",
+        avsResult: succeeded
+          ? attemptRng.weighted([
+              ["pass", 45],
+              ["unavailable", 55],
+            ])
+          : "fail",
         cvvResult: succeeded
           ? "pass"
           : attemptRng.weighted([
@@ -171,11 +208,12 @@ function accountTakeover(
   const pool = legit.victimPool;
   if (pool.length === 0) return;
   const victim = pool[rng.int(0, pool.length - 1)] as Person;
-  b.labelEntity("customer", victim.customerId, "victim", ctx.scenarioId);
-
   const atMs = b.sampleDayTime(rng, b.spec.startAtMs + rng.int(5, b.spec.days - 3) * DAY_MS);
+  const victimCards = b.cardsAvailableAt(victim.cardIds, atMs);
+  if (victimCards.length === 0) return;
+  b.labelEntity("customer", victim.customerId, "victim", ctx.scenarioId);
   const attackerCity = b.pickCity(rng, CITIES);
-  const device = b.addDevice([...path, "device"], rng, atMs - HOUR_MS, {
+  const device = b.addDevice([...path, "device"], rng, atMs - rng.int(0, 350) * DAY_MS, {
     automationSignals: rng.chance(2_000),
   });
   const ip = b.homeIp([...path, "ip"], rng, attackerCity);
@@ -184,8 +222,8 @@ function accountTakeover(
     customerId: victim.customerId,
     deviceId: device.deviceId,
     ipId: ip.ipId,
-    startedAtMs: atMs - 40 * MINUTE_MS,
-    endedAtMs: atMs + 20 * MINUTE_MS,
+    startedAtMs: atMs - rng.int(6, 22) * MINUTE_MS,
+    endedAtMs: atMs + rng.int(1, 10) * MINUTE_MS,
     channel: "web",
   });
 
@@ -235,17 +273,17 @@ function accountTakeover(
     [...path, "txn"],
     {
       customerId: victim.customerId,
-      cardId: victim.cardIds[0] as string,
+      cardId: victimCards[0] as string,
       merchantId: merchant.merchantId,
       sessionId: session.sessionId,
       atMs,
-      amountMinor: rng.int(4_500, 18_000) * 100,
+      amountMinor: rng.lognormalInt(merchant.avgTicketMinor * 1.4, 0.6, 5_000),
       status: stepUpFails ? "declined" : "captured",
       declineReason: stepUpFails ? "authentication_failed" : null,
       avsResult: rng.weighted([
-        ["unavailable", 55],
-        ["fail", 30],
-        ["pass", 15],
+        ["pass", 42],
+        ["unavailable", 33],
+        ["fail", 25],
       ]),
       cvvResult: "pass",
       threeDsResult: stepUpFails
@@ -254,7 +292,7 @@ function accountTakeover(
             ["unavailable", 60],
             ["pass", 40],
           ]),
-      shippingCity: attackerCity.name,
+      shippingCity: SHIPPED_CATEGORIES.has(merchant.category) ? attackerCity.name : null,
     },
     { isFraud: !stepUpFails, family: ctx.family, variant: ctx.variant, scenarioId: ctx.scenarioId },
   );
@@ -274,15 +312,25 @@ function abuseRing(
 ): void {
   const path = ["fraud", ctx.variant, n] as const;
   const rng = b.stream(...path);
-  const size = rng.int(4, 9);
-  const creationBase = b.spec.startAtMs + rng.int(3, b.spec.days - 10) * DAY_MS;
+  const size = rng.int(3, 6);
+  const activeFrom = rng.int(3, Math.max(4, b.spec.days - 10));
+  // Rings farm accounts well ahead of use. The coordination signal is that a ring's
+  // accounts are created within hours of *each other*; placing that cluster anywhere in
+  // the past keeps the signal without making account age a proxy for the label.
+  const clusterAgeDays = rng.weighted([
+    [rng.int(2, 40), 20],
+    [rng.int(40, 220), 25],
+    [rng.int(220, 560), 30],
+    [rng.int(560, 950), 25],
+  ]);
+  const creationBase = b.spec.startAtMs + (activeFrom - clusterAgeDays) * DAY_MS;
   const merchants = liquidMerchants(b);
   const targetMerchant = rng.pick(merchants);
 
   const sharedDevice =
     variant === "shared_infrastructure"
       ? b.addDevice([...path, "shared-device"], rng, creationBase, {
-          automationSignals: rng.chance(4_000),
+          automationSignals: rng.chance(2_500),
         })
       : null;
   const sharedCity = b.pickCity(rng);
@@ -290,9 +338,9 @@ function abuseRing(
     variant === "shared_infrastructure" ? b.homeIp([...path, "shared-ip"], rng, sharedCity) : null;
 
   const burstDays = rng
-    .shuffle(Array.from({ length: b.spec.days }, (_, d) => d))
-    .slice(0, rng.int(2, 4));
-  const baseAmount = rng.int(2_000, 8_000) * 100;
+    .shuffle(Array.from({ length: b.spec.days - activeFrom }, (_, d) => d + activeFrom))
+    .slice(0, rng.int(3, 6));
+  const baseAmount = rng.lognormalInt(targetMerchant.avgTicketMinor, 0.35, 2_000);
 
   for (let m = 0; m < size; m += 1) {
     const mulePath = [...path, "mule", m] as const;
@@ -303,23 +351,44 @@ function abuseRing(
       homeCountry: "IN",
       homeCity: city.name,
       emailDomain: b.pickEmailDomain(muleRng),
-      kycLevel: muleRng.int(0, 1),
+      kycLevel: muleRng.weighted([
+        [0, 30],
+        [1, 40],
+        [2, 30],
+      ]),
     }).customerId;
     b.labelEntity("customer", customerId, "mule", ctx.scenarioId);
 
-    const device = sharedDevice ?? b.addDevice([...mulePath, "device"], muleRng, creationBase);
+    const device =
+      sharedDevice ??
+      b.addDevice(
+        [...mulePath, "device"],
+        muleRng,
+        creationBase + muleRng.int(0, Math.max(0, clusterAgeDays - 1)) * DAY_MS,
+      );
     const ip = sharedIp ?? b.homeIp([...mulePath, "ip"], muleRng, city);
-    const card = b.addCard([...mulePath, "card"], muleRng, customerId, creationBase);
+    const card = b.addCard(
+      [...mulePath, "card"],
+      muleRng,
+      customerId,
+      creationBase + muleRng.int(0, Math.max(0, clusterAgeDays - 1)) * DAY_MS,
+    );
 
     for (const [i, day] of burstDays.entries()) {
-      const windowStart = b.spec.startAtMs + day * DAY_MS + 20 * HOUR_MS;
+      // The coordination signal is that mules act inside the same narrow window, not
+      // that the window sits at an unusual hour: the hour itself comes from the same
+      // curve every legitimate customer uses.
+      const windowStart = b.sampleDayTime(
+        b.stream(...path, "window", day),
+        b.spec.startAtMs + day * DAY_MS,
+      );
       const atMs = windowStart + muleRng.int(0, 18) * MINUTE_MS;
       const session = b.addSession([...mulePath, "session", i], {
         customerId,
         deviceId: device.deviceId,
         ipId: ip.ipId,
-        startedAtMs: atMs - MINUTE_MS,
-        endedAtMs: atMs + 3 * MINUTE_MS,
+        startedAtMs: atMs - muleRng.int(2, 14) * MINUTE_MS,
+        endedAtMs: atMs + muleRng.int(1, 9) * MINUTE_MS,
         channel: "web",
       });
       b.addTransaction(
@@ -330,7 +399,7 @@ function abuseRing(
           merchantId: targetMerchant.merchantId,
           sessionId: session.sessionId,
           atMs,
-          amountMinor: baseAmount + muleRng.int(-200, 200) * 100,
+          amountMinor: baseAmount + muleRng.int(-3, 3) * (baseAmount / 100),
           status: "captured",
           declineReason: null,
           avsResult: muleRng.weighted([
@@ -339,7 +408,7 @@ function abuseRing(
           ]),
           cvvResult: "pass",
           threeDsResult: "not_requested",
-          shippingCity: city.name,
+          shippingCity: SHIPPED_CATEGORIES.has(targetMerchant.category) ? city.name : null,
         },
         { isFraud: true, family: ctx.family, variant: ctx.variant, scenarioId: ctx.scenarioId },
       );
@@ -367,6 +436,8 @@ function friendlyFraud(
   const buyer = pool[rng.int(0, pool.length - 1)] as Person;
 
   const atMs = b.sampleDayTime(rng, b.spec.startAtMs + rng.int(2, b.spec.days - 30) * DAY_MS);
+  const usableCards = b.cardsAvailableAt(buyer.cardIds, atMs);
+  if (usableCards.length === 0) return;
   const merchant = rng.pick(b.merchantsIn(["electronics", "fashion", "gaming", "travel"]));
   const session = b.addSession([...path, "session"], {
     customerId: buyer.customerId,
@@ -377,12 +448,12 @@ function friendlyFraud(
     channel: buyer.channel,
   });
 
-  const amount = rng.lognormalInt(merchant.avgTicketMinor * 1.2, 0.5, 5_000);
+  const amount = rng.lognormalInt(merchant.avgTicketMinor, 0.55, 3_000);
   const txn = b.addTransaction(
     [...path, "txn"],
     {
       customerId: buyer.customerId,
-      cardId: rng.pick(buyer.cardIds),
+      cardId: rng.pick(usableCards),
       merchantId: merchant.merchantId,
       sessionId: session.sessionId,
       atMs,
@@ -390,7 +461,7 @@ function friendlyFraud(
       status: "captured",
       declineReason: null,
       threeDsResult: amount >= 400_000 ? "pass" : "not_requested",
-      shippingCity: buyer.homeCity.name,
+      shippingCity: SHIPPED_CATEGORIES.has(merchant.category) ? buyer.homeCity.name : null,
     },
     { isFraud: true, family: ctx.family, variant: ctx.variant, scenarioId: ctx.scenarioId },
   );

@@ -124,6 +124,15 @@ export class WorldBuilder {
     }
   }
 
+  /**
+   * Instruments a customer could actually present at a given moment. Returns an empty
+   * list rather than a not-yet-issued card: callers must skip the event instead of
+   * producing a transaction that precedes its own instrument.
+   */
+  cardsAvailableAt(cardIds: readonly string[], atMs: number): string[] {
+    return cardIds.filter((id) => (this.cards.get(id)?.addedAtMs ?? 0) <= atMs);
+  }
+
   merchantsIn(categories: readonly string[]): Merchant[] {
     return [...this.merchants.values()].filter((m) => categories.includes(m.category));
   }

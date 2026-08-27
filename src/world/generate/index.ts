@@ -99,4 +99,4 @@ export function generateWorld(options: GenerateOptions): GenerateResult {
 }
 
 export type { WorldSpec } from "./config.js";
-export { developmentSpec, heldoutSpec, testSpec } from "./config.js";
+export { developmentSpec, heldoutSpec, qualitySpec, testSpec } from "./config.js";
