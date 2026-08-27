@@ -27,7 +27,7 @@ beforeAll(async () => {
   writeModel(modelPath, model);
   app = createServer({ dataDirectory: directory, modelPath });
   await app.ready();
-}, 120_000);
+});
 
 afterAll(async () => {
   await app.close();

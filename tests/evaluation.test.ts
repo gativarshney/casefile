@@ -28,7 +28,7 @@ beforeAll(() => {
     readFileSync(join(directory, "dataset_manifest.json"), "utf8"),
   ) as DatasetManifest;
   report = evaluate(generated.worldPath, generated.labelsPath, manifest, model, "quality");
-}, 120_000);
+});
 
 afterAll(() => {
   rmSync(directory, { recursive: true, force: true });
