@@ -94,6 +94,7 @@ export const cardEnumeration: Probe = {
         hardDeclines,
         declineRateBps: Math.round((declined.length / window.length) * 10_000),
         windowHours: ENUMERATION_WINDOW_MS / HOUR_MS,
+        subjectCaptured: context.subject.status === "captured",
       },
       sources,
     );

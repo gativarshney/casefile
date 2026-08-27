@@ -13,6 +13,7 @@ import type { Evidence, Finding } from "../evidence/types.js";
 export const FINDING_CODES = [
   "card.bin_spread",
   "card.hard_decline_mix",
+  "card.capture_among_declines",
   "velocity.above_baseline",
   "amount.above_merchant_ticket",
   "amount.above_customer_norm",
@@ -47,6 +48,7 @@ export type FindingCode = (typeof FINDING_CODES)[number];
 export const FINDING_DIRECTION: Readonly<Record<FindingCode, 1 | -1>> = {
   "card.bin_spread": 1,
   "card.hard_decline_mix": 1,
+  "card.capture_among_declines": 1,
   "velocity.above_baseline": 1,
   "amount.above_merchant_ticket": 1,
   "amount.above_customer_norm": 1,
@@ -182,6 +184,18 @@ function enumerationFindings(p: Record<string, never>, id: string, emit: Emitter
       "inculpatory",
       hard / Math.max(3, attempts),
       `${hard} of ${attempts} attempts hard-declined by the issuer`,
+      id,
+    );
+  }
+  // Testing a stolen list produces a wall of declines; the payment that finally goes
+  // through is the one being monetised. That the subject succeeded where the window
+  // around it did not is what separates it from the attempts beside it.
+  if ((p.subjectCaptured as unknown as boolean) && hard >= 3) {
+    emit(
+      "card.capture_among_declines",
+      "inculpatory",
+      Math.min(1, hard / 6),
+      `this payment succeeded after ${hard} hard declines in the same window`,
       id,
     );
   }
