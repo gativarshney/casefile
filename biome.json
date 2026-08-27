@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**/*.ts", "**/*.json", "!**/package-lock.json"]
+    "includes": ["**/*.ts", "**/*.json", "!**/package-lock.json", "!tools/reference/*.json"]
   },
   "formatter": {
     "enabled": true,
