@@ -1,4 +1,5 @@
 import type { EvaluationReport } from "./evaluate.js";
+import type { SensitivityReport } from "./sensitivity.js";
 
 const rupees = (minor: number): string => `₹${Math.round(minor / 100).toLocaleString("en-IN")}`;
 const percent = (value: number): string => `${(value * 100).toFixed(1)}%`;
@@ -116,6 +117,62 @@ export function formatEvaluation(report: EvaluationReport): string {
       `  ${`${percent(bin.lower)}–${percent(bin.upper)}`.padEnd(14)}${String(bin.count).padStart(6)}` +
         `${percent(bin.predicted).padStart(11)}${percent(bin.observed).padStart(10)}`,
     );
+  }
+
+  return lines.join("\n");
+}
+
+export function formatSensitivity(report: SensitivityReport): string {
+  const lines: string[] = [];
+  const ratio = (value: number): string =>
+    Number.isFinite(value) ? `1:${(1 / value).toFixed(2)}` : "1:0";
+
+  lines.push("COST SENSITIVITY");
+  lines.push(`  alerts priced    ${report.alerts.toLocaleString("en-IN")}`);
+  lines.push(
+    `  at the defaults  casefile ${rupees(report.baseOutcome.casefileMinor)} vs rules only ` +
+      `${rupees(report.baseOutcome.rulesOnlyMinor)} (${percent(report.baseOutcome.savedShare)} saved)`,
+  );
+  lines.push("");
+  lines.push("  Ranges below are assumptions, not Razorpay figures. Every other parameter");
+  lines.push("  stays at its default while one is swept.");
+
+  for (const axis of report.axes) {
+    lines.push("");
+    lines.push(`  ${axis.label.toUpperCase()}  (default ${axis.baseLabel})`);
+    lines.push(
+      `    ${"value".padEnd(12)}${"FP:FN".padStart(9)}${"rules only".padStart(14)}` +
+        `${"casefile".padStart(14)}${"saved".padStart(14)}${"%".padStart(8)}${"wins".padStart(7)}`,
+    );
+    for (const row of axis.rows) {
+      lines.push(
+        `    ${row.label.padEnd(12)}${ratio(row.falsePositiveToNegative).padStart(9)}` +
+          `${rupees(row.outcome.rulesOnlyMinor).padStart(14)}${rupees(row.outcome.casefileMinor).padStart(14)}` +
+          `${rupees(row.outcome.savedVsRulesMinor).padStart(14)}${percent(row.outcome.savedShare).padStart(8)}` +
+          `${(row.outcome.casefileWins ? "yes" : "NO").padStart(7)}`,
+      );
+    }
+  }
+
+  lines.push("");
+  lines.push("  FULL GRID");
+  lines.push(
+    `    casefile is cheaper in ${report.grid.wins} of ${report.grid.combinations} combinations`,
+  );
+  lines.push(
+    `    saving ranges from ${percent(report.grid.worstSavedShare)} to ${percent(report.grid.bestSavedShare)}`,
+  );
+  if (report.grid.losses.length === 0) {
+    lines.push("    no combination in the swept ranges makes manual review cheaper");
+  } else {
+    lines.push(`    ${report.grid.losses.length} combination(s) where manual review is cheaper:`);
+    for (const loss of report.grid.losses) {
+      lines.push(
+        `      accuracy ${(loss.analystAccuracyBps / 100).toFixed(0)}%, ` +
+          `goodwill ${rupees(loss.falseDeclineGoodwillMinor)}, ` +
+          `chargeback ${rupees(loss.chargebackFeeMinor)} → ${percent(loss.outcome.savedShare)}`,
+      );
+    }
   }
 
   return lines.join("\n");

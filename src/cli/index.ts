@@ -6,9 +6,10 @@ import { Command } from "commander";
 import { raiseAlerts } from "../alerting/rules.js";
 import { createServer } from "../api/server.js";
 import { type CaseArtifact, investigate, readCase, writeCase } from "../case/artifact.js";
-import { evaluate } from "../eval/evaluate.js";
+import { evaluate, scoreAlerts } from "../eval/evaluate.js";
 import { formatReport, inspectWorld } from "../eval/inspect.js";
-import { formatEvaluation } from "../eval/report.js";
+import { formatEvaluation, formatSensitivity } from "../eval/report.js";
+import { analyseSensitivity } from "../eval/sensitivity.js";
 import { buildTrainingSet, trainModel, writeModel } from "../eval/train.js";
 import { narrateCase } from "../llm/narrate.js";
 import { providerFromEnvironment } from "../llm/provider.js";
@@ -143,6 +144,36 @@ program
       );
       process.stdout.write(`
 report written to ${options.json}
+`);
+    }
+  });
+
+program
+  .command("sensitivity")
+  .description("Sweep the cost assumptions and report whether triage still pays")
+  .option("-d, --data <directory>", "world directory", DEFAULT_DATA_DIR)
+  .option("-m, --model <path>", "frozen model", DEFAULT_MODEL_PATH)
+  .option("--json <path>", "also write the full sweep as JSON")
+  .action((options: { data: string; model: string; json?: string }) => {
+    const model = requireModel(options.model);
+    const scored = scoreAlerts(
+      join(options.data, "world.db"),
+      join(options.data, "labels.db"),
+      model,
+    );
+    const report = analyseSensitivity(scored);
+    process.stdout.write(`${formatSensitivity(report)}
+`);
+    if (options.json) {
+      mkdirSync(dirname(options.json), { recursive: true });
+      writeFileSync(
+        options.json,
+        `${JSON.stringify(report, null, 2)}
+`,
+        "utf8",
+      );
+      process.stdout.write(`
+sweep written to ${options.json}
 `);
     }
   });
