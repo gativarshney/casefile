@@ -63,6 +63,17 @@ describe("overview and queue", () => {
     }
   });
 
+  it.each([
+    "/api/cases/..%2F..%2Fescape",
+    "/api/cases/alert_..%2F..%2Fescape",
+    "/api/truth/..%2F..%2Fsecret",
+  ])("refuses a path-traversal identifier: %s", async (url) => {
+    // The identifier reaches a filesystem path, so a caller must not be able to steer a
+    // read or a write outside the directory the server owns.
+    const response = await app.inject({ method: "GET", url });
+    expect(response.statusCode).toBeGreaterThanOrEqual(400);
+  });
+
   it("returns 404 for an unknown alert", async () => {
     expect((await app.inject({ method: "GET", url: "/api/cases/alert_nope" })).statusCode).toBe(
       404,

@@ -71,6 +71,10 @@ export function createServer(options: ServerOptions): FastifyInstance {
    * always pass and prove nothing.
    */
   const sealedCase = (alertId: string): CaseArtifact | undefined => {
+    // The identifier reaches a filesystem path, so it is constrained to the shape the
+    // generator produces rather than trusted: a caller must not be able to steer a
+    // write outside the artifact directory.
+    if (!/^alert_[A-Za-z0-9_]{1,64}$/.test(alertId)) return undefined;
     const path = join(artifactDirectory, `${alertId}.json`);
     if (existsSync(path)) return readCase(path);
     const artifact = withWorld((reader) => {
@@ -196,6 +200,9 @@ export function createServer(options: ServerOptions): FastifyInstance {
    * exists for the reviewer, not for the verifier.
    */
   app.get<{ Params: { txnId: string } }>("/api/truth/:txnId", (request, reply) => {
+    if (!/^txn_[A-Za-z0-9]{1,64}$/.test(request.params.txnId)) {
+      return reply.code(400).send({ error: "malformed transaction id" });
+    }
     const labels = new LabelReader(labelsPath);
     try {
       const label = labels.get(TRANSACTION_LABELS, request.params.txnId);
