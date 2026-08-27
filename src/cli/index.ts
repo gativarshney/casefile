@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { raiseAlerts } from "../alerting/rules.js";
+import { createServer } from "../api/server.js";
 import { type CaseArtifact, investigate, readCase, writeCase } from "../case/artifact.js";
 import { evaluate } from "../eval/evaluate.js";
 import { formatReport, inspectWorld } from "../eval/inspect.js";
@@ -273,6 +274,20 @@ function printCase(artifact: CaseArtifact): void {
   process.stdout.write(`  model ${artifact.modelHash}\n`);
   process.stdout.write(`  case  ${artifact.caseHash}\n`);
 }
+
+program
+  .command("serve")
+  .description("Run the investigation console API")
+  .option("-d, --data <directory>", "world directory", DEFAULT_DATA_DIR)
+  .option("-m, --model <path>", "frozen model", DEFAULT_MODEL_PATH)
+  .option("-p, --port <number>", "port to listen on", "8787")
+  .action(async (options: { data: string; model: string; port: string }) => {
+    const app = createServer({ dataDirectory: options.data, modelPath: options.model });
+    await app.listen({ port: Number(options.port), host: "127.0.0.1" });
+    process.stdout.write(`casefile api on http://localhost:${options.port}
+`);
+    process.stdout.write("run the console with: npm run web\n");
+  });
 
 program.parseAsync(process.argv).catch((error: unknown) => {
   if (error instanceof IntegrityError) {
