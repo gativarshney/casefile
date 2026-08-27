@@ -60,6 +60,29 @@ export interface DatasetManifest {
   readonly worldRoot: Digest;
 }
 
+/**
+ * Access paths the probes depend on. Every probe filters by entity and by time window,
+ * and without these the evaluation degrades into a full scan per query — which is the
+ * difference between a demo that responds instantly and one that stalls.
+ */
+const INDICES: Readonly<Record<string, readonly (readonly string[])[]>> = {
+  cards: [["customerId"], ["bin"]],
+  sessions: [["customerId", "startedAtMs"], ["deviceId"], ["ipId"]],
+  auth_events: [["customerId", "atMs"], ["sessionId"]],
+  profile_changes: [["customerId", "atMs"]],
+  transactions: [["customerId", "atMs"], ["merchantId"], ["sessionId"], ["cardId"]],
+  disputes: [["txnId"]],
+  transaction_labels: [["isFraud"], ["family"], ["scenarioId"]],
+  entity_labels: [["entityId"]],
+};
+
+function createIndexSql(type: ErasedRecordType): string[] {
+  return (INDICES[type.table] ?? []).map(
+    (columns) =>
+      `CREATE INDEX ix_${type.table}_${columns.join("_")} ON ${type.table} (${columns.join(", ")})`,
+  );
+}
+
 function createTableSql(type: ErasedRecordType): string {
   const columns = type.columns.map((name) =>
     name === type.primaryKey ? `  ${name} TEXT PRIMARY KEY` : `  ${name}`,
@@ -90,7 +113,10 @@ export class WorldStore {
     if (existsSync(path)) rmSync(path, { force: true });
     this.db = new Database(path);
     this.db.pragma("journal_mode = WAL");
-    for (const type of this.types) this.db.exec(createTableSql(type));
+    for (const type of this.types) {
+      this.db.exec(createTableSql(type));
+      for (const statement of createIndexSql(type)) this.db.exec(statement);
+    }
   }
 
   insert<T extends Record<string, unknown>>(type: RecordType<T>, records: readonly T[]): number {
