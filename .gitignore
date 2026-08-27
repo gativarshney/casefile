@@ -23,6 +23,7 @@ yarn-error.log*
 data/
 artifacts/
 reports/
+models/
 *.db
 *.db-journal
 *.db-wal
