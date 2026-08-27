@@ -48,13 +48,16 @@ const transaction = (index: number, amountMinor = 150_000): Transaction => ({
   customerId: "cust_0000",
   cardId: "card_0000",
   merchantId: "mer_0000",
+  sessionId: "ses_0000",
   atMs: BASE_MS + index * 60_000,
   amountMinor,
   currency: "INR",
   status: "captured",
+  declineReason: null,
   avsResult: "pass",
   cvvResult: "pass",
   threeDsResult: "pass",
+  shippingCity: null,
   description: "Order 4471",
 });
 

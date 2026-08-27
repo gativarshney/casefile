@@ -9,7 +9,9 @@
  * time, since a field available only in hindsight makes the evaluation clairvoyant
  * rather than honest.
  *
- * Only the records the first end-to-end slice needs are defined so far.
+ * Devices and IP addresses are reachable only through sessions, never denormalised
+ * onto transactions: probes must traverse the entity graph the way an acquirer's
+ * systems actually would.
  */
 import { z } from "zod";
 import { digest } from "../canon/hash.js";
@@ -42,11 +44,29 @@ export const TransactionStatus = z.enum(["authorized", "captured", "declined", "
 export type TransactionStatus = z.infer<typeof TransactionStatus>;
 
 /**
+ * The composition of decline reasons carries more signal than any single decline: a
+ * wall of `invalid_card` across many BINs is enumeration, while `insufficient_funds`
+ * is ordinary life.
+ */
+export const DeclineReason = z.enum([
+  "insufficient_funds",
+  "invalid_card",
+  "expired_card",
+  "do_not_honour",
+  "suspected_fraud",
+  "authentication_failed",
+]);
+export type DeclineReason = z.infer<typeof DeclineReason>;
+
+/**
  * `unavailable` is a distinct outcome from `pass`. A verifier that reads a missing
  * check as a clean one is defeated by suppressing the check.
  */
 export const CheckResult = z.enum(["pass", "fail", "unavailable", "not_requested"]);
 export type CheckResult = z.infer<typeof CheckResult>;
+
+export const Channel = z.enum(["web", "mobile_app", "recurring"]);
+export type Channel = z.infer<typeof Channel>;
 
 export const Customer = z.object({
   customerId: z.string().min(1),
@@ -81,26 +101,118 @@ export const Card = z.object({
   funding: z.enum(["credit", "debit", "prepaid"]),
   issuerCountry: CountryCode,
   addedAtMs: EpochMs,
+  /**
+   * Set when this card replaced an earlier one for the same customer. A reissue changes
+   * the BIN and the instrument age at once, which otherwise reads as a brand-new card
+   * on an established account.
+   */
+  replacesCardId: z.string().min(1).nullable(),
 });
 export type Card = z.infer<typeof Card>;
 
+export const Device = z.object({
+  deviceId: z.string().min(1),
+  /** Null when fingerprinting failed — routine in production, and never exculpatory. */
+  fingerprint: z.string().min(1).nullable(),
+  osFamily: z.string().min(1),
+  browserFamily: z.string().min(1),
+  firstSeenAtMs: EpochMs,
+  /** Noisy on purpose: privacy-hardened legitimate browsers trip this too. */
+  automationSignals: z.boolean(),
+});
+export type Device = z.infer<typeof Device>;
+
+export const IpAddress = z.object({
+  ipId: z.string().min(1),
+  address: z.string().min(1),
+  asn: z.int().positive(),
+  asnOrg: z.string().min(1),
+  /** Null when geolocation is unavailable — common for mobile carriers. */
+  country: CountryCode.nullable(),
+  city: z.string().min(1).nullable(),
+  isDatacenter: z.boolean(),
+  /** Third-party VPN classification, wrong often enough to matter. */
+  vpnSuspected: z.boolean(),
+});
+export type IpAddress = z.infer<typeof IpAddress>;
+
+export const Session = z.object({
+  sessionId: z.string().min(1),
+  /** Null before authentication — card testing largely happens there. */
+  customerId: z.string().min(1).nullable(),
+  deviceId: z.string().min(1),
+  ipId: z.string().min(1),
+  startedAtMs: EpochMs,
+  endedAtMs: EpochMs,
+  channel: Channel,
+});
+export type Session = z.infer<typeof Session>;
+
+export const AuthEvent = z.object({
+  authEventId: z.string().min(1),
+  sessionId: z.string().min(1),
+  customerId: z.string().min(1).nullable(),
+  kind: z.enum(["login", "otp_challenge", "three_ds_challenge", "password_reset"]),
+  outcome: z.enum(["success", "failure", "abandoned"]),
+  atMs: EpochMs,
+});
+export type AuthEvent = z.infer<typeof AuthEvent>;
+
+/**
+ * Only digests of the old and new values are retained. Contact-detail churn just before
+ * a high-value purchase is one of the strongest takeover signals, and it does not
+ * require knowing what the values were.
+ */
+export const ProfileChange = z.object({
+  changeId: z.string().min(1),
+  customerId: z.string().min(1),
+  sessionId: z.string().min(1),
+  field: z.enum(["email", "phone", "shipping_address", "password"]),
+  atMs: EpochMs,
+  oldValueDigest: z.string().min(1),
+  newValueDigest: z.string().min(1),
+});
+export type ProfileChange = z.infer<typeof ProfileChange>;
+
 export const Transaction = z.object({
   txnId: z.string().min(1),
-  /** Null before authentication, which is where card testing largely happens. */
   customerId: z.string().min(1).nullable(),
   cardId: z.string().min(1),
   merchantId: z.string().min(1),
+  sessionId: z.string().min(1),
   atMs: EpochMs,
   amountMinor: MinorUnits.positive(),
   currency: z.literal(CURRENCY),
   status: TransactionStatus,
+  declineReason: DeclineReason.nullable(),
   avsResult: CheckResult,
   cvvResult: CheckResult,
   threeDsResult: CheckResult,
+  shippingCity: z.string().min(1).nullable(),
   /** Attacker-controlled in production: never a signal, never reaches a prompt raw. */
   description: z.string(),
 });
 export type Transaction = z.infer<typeof Transaction>;
+
+/**
+ * Disputes land weeks after their transaction. The verifier may consult disputes on
+ * *prior* transactions as history, but never the dispute belonging to the transaction
+ * under investigation — that would be reading the future.
+ */
+export const Dispute = z.object({
+  disputeId: z.string().min(1),
+  txnId: z.string().min(1),
+  openedAtMs: EpochMs,
+  category: z.enum([
+    "unauthorised",
+    "not_received",
+    "not_as_described",
+    "duplicate",
+    "subscription_cancelled",
+  ]),
+  outcome: z.enum(["pending", "won", "lost"]),
+});
+export type Dispute = z.infer<typeof Dispute>;
 
 /**
  * Record types with the payload type erased, for heterogeneous collections such as
@@ -123,7 +235,7 @@ export interface RecordType<T> extends ErasedRecordType {
   parse(row: unknown): T;
 }
 
-function defineRecordType<T extends Record<string, unknown>>(
+export function defineRecordType<T extends Record<string, unknown>>(
   table: string,
   primaryKey: keyof T & string,
   schema: z.ZodObject<z.ZodRawShape>,
@@ -161,14 +273,30 @@ function unwrapType(field: unknown): string | undefined {
 export const CUSTOMERS = defineRecordType<Customer>("customers", "customerId", Customer);
 export const MERCHANTS = defineRecordType<Merchant>("merchants", "merchantId", Merchant);
 export const CARDS = defineRecordType<Card>("cards", "cardId", Card);
+export const DEVICES = defineRecordType<Device>("devices", "deviceId", Device);
+export const IP_ADDRESSES = defineRecordType<IpAddress>("ip_addresses", "ipId", IpAddress);
+export const SESSIONS = defineRecordType<Session>("sessions", "sessionId", Session);
+export const AUTH_EVENTS = defineRecordType<AuthEvent>("auth_events", "authEventId", AuthEvent);
+export const PROFILE_CHANGES = defineRecordType<ProfileChange>(
+  "profile_changes",
+  "changeId",
+  ProfileChange,
+);
 export const TRANSACTIONS = defineRecordType<Transaction>("transactions", "txnId", Transaction);
+export const DISPUTES = defineRecordType<Dispute>("disputes", "disputeId", Dispute);
 
 /** Order fixes the leaf ordering of the dataset Merkle tree; changing it moves the root. */
 export const WORLD_RECORD_TYPES: readonly ErasedRecordType[] = [
   CUSTOMERS,
   MERCHANTS,
   CARDS,
+  DEVICES,
+  IP_ADDRESSES,
+  SESSIONS,
+  AUTH_EVENTS,
+  PROFILE_CHANGES,
   TRANSACTIONS,
+  DISPUTES,
 ];
 
 /**

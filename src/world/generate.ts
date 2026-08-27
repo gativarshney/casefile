@@ -103,6 +103,7 @@ function buildLegitimate(seed: number, count: number, merchants: readonly Mercha
       funding: rng.pick(["credit", "debit"]),
       issuerCountry: "IN",
       addedAtMs: EPOCH_MS - (tenureDays - 5) * DAY_MS,
+      replacesCardId: null,
     });
 
     const purchases = rng.int(4, 11);
@@ -113,6 +114,7 @@ function buildLegitimate(seed: number, count: number, merchants: readonly Mercha
         customerId,
         cardId,
         merchantId: merchant.merchantId,
+        sessionId: `ses_l${pad(index, 4)}_${pad(n, 3)}`,
         atMs: EPOCH_MS - rng.int(1, 60) * DAY_MS + rng.int(0, 20) * HOUR_MS,
         amountMinor: Math.max(
           5_000,
@@ -120,9 +122,11 @@ function buildLegitimate(seed: number, count: number, merchants: readonly Mercha
         ),
         currency: "INR",
         status: "captured",
+        declineReason: null,
         avsResult: "pass",
         cvvResult: "pass",
         threeDsResult: rng.chance(7_000) ? "pass" : "not_requested",
+        shippingCity: null,
         description: `Order ${rng.int(1000, 9999)}`,
       });
     }
@@ -168,6 +172,7 @@ function buildCardTesting(seed: number, merchants: readonly Merchant[]): Populat
       funding: "credit",
       issuerCountry: rng.chance(3_000) ? "US" : "IN",
       addedAtMs: startMs + n * 45_000,
+      replacesCardId: null,
     });
 
     const succeeded = n === attempts - 1;
@@ -176,13 +181,16 @@ function buildCardTesting(seed: number, merchants: readonly Merchant[]): Populat
       customerId,
       cardId,
       merchantId: liquid.merchantId,
+      sessionId: "ses_f0001",
       atMs: startMs + n * 45_000,
       amountMinor: succeeded ? 292_500 : rng.int(1, 5) * 100,
       currency: "INR",
       status: succeeded ? "captured" : "declined",
+      declineReason: succeeded ? null : rng.pick(["invalid_card", "do_not_honour"]),
       avsResult: succeeded ? "unavailable" : "fail",
       cvvResult: succeeded ? "pass" : "fail",
       threeDsResult: "not_requested",
+      shippingCity: null,
       description: succeeded ? "Gift card 500" : "Verification",
     });
   }
