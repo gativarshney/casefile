@@ -14,6 +14,7 @@
  */
 
 import { type CaseArtifact, caseHashOf, investigate } from "../case/artifact.js";
+import { type FrozenModel, modelHash } from "../scoring/model.js";
 import { recordHash, TRANSACTIONS } from "../world/schema.js";
 import type { DatasetManifest } from "../world/store.js";
 import { IntegrityError, type WorldReader } from "../world/store.js";
@@ -39,6 +40,7 @@ export function replayCase(
   reader: WorldReader,
   manifest: DatasetManifest,
   artifact: CaseArtifact,
+  model: FrozenModel,
 ): ReplayResult {
   if (artifact.worldRoot !== manifest.worldRoot) {
     throw new IntegrityError(
@@ -60,9 +62,15 @@ export function replayCase(
 
   const recordsVerified = verifySources(reader, artifact);
 
-  const replayed = investigate(reader, manifest, artifact.alert, artifact.plan);
+  if (modelHash(model) !== artifact.modelHash) {
+    throw new ReplayMismatchError("modelHash", artifact.modelHash, modelHash(model));
+  }
+
+  const replayed = investigate(reader, manifest, artifact.alert, model, artifact.plan);
   assertSame("evidence ids", ids(artifact), ids(replayed));
-  assertSame("score", artifact.score, replayed.score);
+  assertSame("findings", fingerprintFindings(artifact), fingerprintFindings(replayed));
+  assertSame("logOdds", artifact.logOdds, replayed.logOdds);
+  assertSame("fraudProbability", artifact.fraudProbability, replayed.fraudProbability);
   assertSame("action", artifact.action, replayed.action);
   assertSame("caseHash", artifact.caseHash, replayed.caseHash);
 
@@ -123,6 +131,10 @@ function verifySources(reader: WorldReader, artifact: CaseArtifact): number {
 
 function ids(artifact: CaseArtifact): string {
   return artifact.evidence.map((item) => item.evidenceId).join(",");
+}
+
+function fingerprintFindings(artifact: CaseArtifact): string {
+  return artifact.findings.map((f) => `${f.code}:${f.intensity}`).join(",");
 }
 
 function assertSame(field: string, expected: unknown, actual: unknown): void {

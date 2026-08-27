@@ -12,7 +12,9 @@ import {
   readCase,
   writeCase,
 } from "../src/case/artifact.js";
+import { buildTrainingSet, trainModel } from "../src/eval/train.js";
 import { ReplayMismatchError, replayCase } from "../src/replay/replay.js";
+import type { FrozenModel } from "../src/scoring/model.js";
 import { generateWorld, testSpec } from "../src/world/generate/index.js";
 import { LabelReader, TRANSACTION_LABELS } from "../src/world/labels.js";
 import { TRANSACTIONS } from "../src/world/schema.js";
@@ -22,6 +24,7 @@ let directory: string;
 let worldPath: string;
 let labelsPath: string;
 let manifest: DatasetManifest;
+let model: FrozenModel;
 
 beforeEach(() => {
   directory = mkdtempSync(join(tmpdir(), "casefile-slice-"));
@@ -29,6 +32,12 @@ beforeEach(() => {
   worldPath = result.worldPath;
   labelsPath = result.labelsPath;
   manifest = result.manifest;
+  model = trainModel(buildTrainingSet(worldPath, labelsPath), {
+    world: "test",
+    specDigest: "test",
+    alerts: 0,
+    positives: 0,
+  }).model;
 });
 
 afterEach(() => {
@@ -60,7 +69,7 @@ function fraudAlert(): Alert {
 }
 
 function fraudCase(): CaseArtifact {
-  return withWorld((reader) => investigate(reader, manifest, fraudAlert()));
+  return withWorld((reader) => investigate(reader, manifest, fraudAlert(), model));
 }
 
 function tamper(sql: string, params: readonly unknown[]): void {
@@ -133,7 +142,7 @@ describe("investigation", () => {
 
   it("investigating the same alert twice produces an identical case", () => {
     const first = fraudCase();
-    const second = withWorld((reader) => investigate(reader, manifest, first.alert));
+    const second = withWorld((reader) => investigate(reader, manifest, first.alert, model));
     expect(first).toEqual(second);
   });
 
@@ -141,15 +150,32 @@ describe("investigation", () => {
     expect(() => canonicalJson(JSON.parse(JSON.stringify(fraudCase())))).not.toThrow();
   });
 
-  it("the score is a fixed-precision string, not a number", () => {
-    expect(typeof fraudCase().score).toBe("string");
+  it("the probability is a fixed-precision string, not a number", () => {
+    expect(typeof fraudCase().fraudProbability).toBe("string");
+  });
+
+  it("every contribution names a feature the model knows", () => {
+    const artifact = fraudCase();
+    for (const contribution of artifact.contributions) {
+      expect(model.featureNames).toContain(contribution.feature);
+    }
+  });
+
+  it("contributions reconstruct the sealed log-odds", () => {
+    // The explanation is exact arithmetic, not an approximation: a reviewer can add the
+    // contributions to the intercept and arrive at the number the system used.
+    const artifact = fraudCase();
+    const total =
+      Number(model.intercept) +
+      artifact.contributions.reduce((sum, contribution) => sum + Number(contribution.logOdds), 0);
+    expect(total).toBeCloseTo(Number(artifact.logOdds), 5);
   });
 });
 
 describe("replay", () => {
   it("an untouched case replays successfully", () => {
     const artifact = fraudCase();
-    const result = withWorld((reader) => replayCase(reader, manifest, artifact));
+    const result = withWorld((reader) => replayCase(reader, manifest, artifact, model));
     expect(result.caseHash).toBe(artifact.caseHash);
     expect(result.recordsVerified).toBeGreaterThan(1);
   });
@@ -158,13 +184,15 @@ describe("replay", () => {
     const artifact = fraudCase();
     const path = join(directory, "case.json");
     writeCase(path, artifact);
-    expect(() => withWorld((reader) => replayCase(reader, manifest, readCase(path)))).not.toThrow();
+    expect(() =>
+      withWorld((reader) => replayCase(reader, manifest, readCase(path), model)),
+    ).not.toThrow();
   });
 
   it("rejects a case built against a different world", () => {
     const artifact = fraudCase();
     const foreign = { ...manifest, worldRoot: "sha256:0000" };
-    expect(() => withWorld((reader) => replayCase(reader, foreign, artifact))).toThrow(
+    expect(() => withWorld((reader) => replayCase(reader, foreign, artifact, model))).toThrow(
       IntegrityError,
     );
   });
@@ -185,7 +213,7 @@ describe("tamper detection", () => {
       999_900,
       citedTransaction(artifact).id,
     ]);
-    expect(() => withWorld((reader) => replayCase(reader, manifest, artifact))).toThrow(
+    expect(() => withWorld((reader) => replayCase(reader, manifest, artifact, model))).toThrow(
       IntegrityError,
     );
   });
@@ -195,7 +223,7 @@ describe("tamper detection", () => {
     const cited = citedTransaction(artifact);
     tamper("UPDATE transactions SET amountMinor = ? WHERE txnId = ?", [999_900, cited.id]);
     try {
-      withWorld((reader) => replayCase(reader, manifest, artifact));
+      withWorld((reader) => replayCase(reader, manifest, artifact, model));
       expect.unreachable("expected an integrity failure");
     } catch (error) {
       const failure = error as IntegrityError;
@@ -215,7 +243,7 @@ describe("tamper detection", () => {
       cited.id,
     );
     db.close();
-    expect(() => withWorld((reader) => replayCase(reader, manifest, artifact))).toThrow(
+    expect(() => withWorld((reader) => replayCase(reader, manifest, artifact, model))).toThrow(
       IntegrityError,
     );
   });
@@ -223,7 +251,7 @@ describe("tamper detection", () => {
   it("an edited case artifact fails its own hash check", () => {
     const artifact = fraudCase();
     const forged = { ...artifact, action: "clear" as const };
-    expect(() => withWorld((reader) => replayCase(reader, manifest, forged))).toThrow(
+    expect(() => withWorld((reader) => replayCase(reader, manifest, forged, model))).toThrow(
       /does not hash to its own sealed value/,
     );
   });
@@ -239,16 +267,18 @@ describe("tamper detection", () => {
     );
     if (!uncited) throw new Error("expected an uncited transaction to exist");
     tamper("UPDATE transactions SET amountMinor = ? WHERE txnId = ?", [123_456, uncited]);
-    expect(() => withWorld((reader) => replayCase(reader, manifest, artifact))).not.toThrow();
+    expect(() =>
+      withWorld((reader) => replayCase(reader, manifest, artifact, model)),
+    ).not.toThrow();
   });
 });
 
 describe("replay distinguishes tampering from system drift", () => {
   it("a diverging verdict on intact data is a mismatch, not an integrity failure", () => {
     const artifact = fraudCase();
-    const drifted: CaseArtifact = { ...artifact, score: "0.0000", action: "clear" };
+    const drifted: CaseArtifact = { ...artifact, fraudProbability: "0.000000", action: "clear" };
     const resealed = { ...drifted, caseHash: caseHashOf(drifted) };
-    expect(() => withWorld((reader) => replayCase(reader, manifest, resealed))).toThrow(
+    expect(() => withWorld((reader) => replayCase(reader, manifest, resealed, model))).toThrow(
       ReplayMismatchError,
     );
   });

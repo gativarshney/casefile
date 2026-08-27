@@ -32,10 +32,11 @@ export interface Finding {
   readonly code: string;
   readonly direction: FindingDirection;
   /**
-   * Provisional integer weight. Replaced in a later phase by fitted, calibrated
-   * coefficients; kept as an integer so the slice exercises the same canonical path.
+   * How strongly the evidence presents, in [0, 1], as a fixed-precision decimal string.
+   * Deliberately separate from the fitted coefficient that decides how much it matters,
+   * so a reviewer can check the observation and its contribution independently.
    */
-  readonly weight: number;
+  readonly intensity: string;
   readonly evidenceIds: readonly string[];
   readonly summary: string;
 }
