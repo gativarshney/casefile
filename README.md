@@ -259,7 +259,7 @@ legitimate` is blocked at 73.7%, with the injection attempt listed among the fin
 
 ## Getting started
 
-Requires **Node.js 20 or later**. Nothing else — no Python, no C++ toolchain, no API key.
+Requires **Node.js 22 or later**. Nothing else — no Python, no C++ toolchain, no API key.
 
 ```bash
 npm install
