@@ -1,64 +1,59 @@
-/**
- * Turns evidence into findings, findings into a score, and a score into an action.
- *
- * The weights here are declared constants, not fitted ones. Phase 5 replaces them with
- * coefficients from a calibrated logistic regression and a threshold derived from an
- * explicit cost matrix; the seam is deliberate, so nothing downstream changes when it
- * does. Until then no probability claim is made — `score` is a bounded index, and the
- * README says so.
- */
 import { quantise } from "../canon/canonical.js";
 import type { Claim, Evidence, Finding } from "../evidence/types.js";
-
-export type Action = "confirm" | "escalate" | "clear";
+import {
+  type Contribution,
+  type FrozenModel,
+  modelHash,
+  scoreWithContributions,
+} from "../scoring/model.js";
+import { deriveFindings, FINDING_CODES, FINDING_DIRECTION } from "./findings.js";
+import { type Action, type CostModel, DEFAULT_COSTS, decide } from "./policy.js";
 
 export interface Assessment {
   readonly findings: readonly Finding[];
   readonly claims: readonly Claim[];
-  readonly score: string;
+  readonly features: readonly string[];
+  readonly contributions: readonly Contribution[];
+  readonly logOdds: string;
+  readonly fraudProbability: string;
   readonly action: Action;
+  readonly expectedCostMinor: number;
+  readonly modelHash: string;
 }
 
-const WEIGHTS = {
-  binSpread: 34,
-  declineRate: 26,
-  liquidCapture: 12,
-  establishedAccount: -28,
-  settledHistory: -18,
-} as const;
-
-const THRESHOLDS = { confirm: 40, escalate: 15 } as const;
-
-interface EnumerationPayload {
-  attempts: number;
-  distinctBins: number;
-  distinctCards: number;
-  declined: number;
-  declineRateBps: number;
-  windowHours: number;
-}
-
-interface TenurePayload {
-  accountAgeDays: number;
-  priorCapturedCount: number;
-  priorCapturedValueMinor: number;
-  kycLevel: number;
-}
-
-export function assess(evidence: readonly Evidence[]): Assessment {
-  const findings: Finding[] = [];
-
-  for (const item of evidence) {
-    if (item.probe === "probe.card_enumeration") {
-      findings.push(...enumerationFindings(item, item.payload as unknown as EnumerationPayload));
-    }
-    if (item.probe === "probe.customer_tenure") {
-      findings.push(...tenureFindings(item, item.payload as unknown as TenurePayload));
-    }
+/**
+ * Findings become a fixed-width feature vector by code.
+ *
+ * The order is `FINDING_CODES`, so a coefficient always refers to the same observation
+ * and a frozen model stays meaningful across runs. A code that fires more than once
+ * contributes its strongest instance rather than accumulating, which keeps every
+ * feature bounded in [0, 1] and stops a single noisy probe dominating the score.
+ */
+export function toFeatureVector(findings: readonly Finding[]): number[] {
+  const byCode = new Map<string, number>();
+  for (const finding of findings) {
+    byCode.set(finding.code, Math.max(byCode.get(finding.code) ?? 0, Number(finding.intensity)));
   }
+  return FINDING_CODES.map((code) => byCode.get(code) ?? 0);
+}
 
-  findings.sort((a, b) => a.code.localeCompare(b.code));
-  const total = findings.reduce((sum, finding) => sum + finding.weight, 0);
+export const FEATURE_NAMES: readonly string[] = FINDING_CODES;
+
+/** Sign constraint per feature, in the same order as {@link FEATURE_NAMES}. */
+export const FEATURE_SIGNS: readonly (1 | -1)[] = FINDING_CODES.map(
+  (code) => FINDING_DIRECTION[code],
+);
+
+export function assess(
+  evidence: readonly Evidence[],
+  model: FrozenModel,
+  amountMinor: number,
+  costs: CostModel = DEFAULT_COSTS,
+): Assessment {
+  const findings = deriveFindings(evidence);
+  const features = toFeatureVector(findings);
+  const scored = scoreWithContributions(model, features);
+  const decision = decide(scored.calibratedProbability, amountMinor, costs);
 
   return {
     findings,
@@ -66,71 +61,16 @@ export function assess(evidence: readonly Evidence[]): Assessment {
       statement: finding.summary,
       evidenceIds: finding.evidenceIds,
     })),
-    // The bounded index keeps the slice honest: it is a sum of declared weights, not a
-    // probability, and quantise() is what stops a float reaching the sealed artifact.
-    score: quantise(Math.max(-100, Math.min(100, total)) / 100, 4),
-    action:
-      total >= THRESHOLDS.confirm ? "confirm" : total >= THRESHOLDS.escalate ? "escalate" : "clear",
+    features: features.map((value) => quantise(value, 6)),
+    contributions: scored.contributions,
+    logOdds: quantise(scored.logOdds, 6),
+    fraudProbability: quantise(scored.calibratedProbability, 6),
+    action: decision.action,
+    expectedCostMinor: decision.expectedCostMinor,
+    modelHash: modelHash(model),
   };
 }
 
-function enumerationFindings(evidence: Evidence, payload: EnumerationPayload): Finding[] {
-  const findings: Finding[] = [];
-  const ids = [evidence.evidenceId];
-
-  if (payload.distinctBins >= 4) {
-    findings.push({
-      code: "card.bin_spread",
-      direction: "inculpatory",
-      weight: WEIGHTS.binSpread,
-      evidenceIds: ids,
-      summary: `${payload.distinctBins} distinct card BINs attempted by one account within ${payload.windowHours} hours`,
-    });
-  }
-  if (payload.attempts >= 5 && payload.declineRateBps >= 6_000) {
-    findings.push({
-      code: "card.decline_rate",
-      direction: "inculpatory",
-      weight: WEIGHTS.declineRate,
-      evidenceIds: ids,
-      summary: `${payload.declined} of ${payload.attempts} attempts declined (${(payload.declineRateBps / 100).toFixed(0)}%)`,
-    });
-  }
-  if (payload.declined >= 3 && payload.attempts > payload.declined) {
-    findings.push({
-      code: "card.success_after_failures",
-      direction: "inculpatory",
-      weight: WEIGHTS.liquidCapture,
-      evidenceIds: ids,
-      summary: `a capture followed ${payload.declined} declined attempts in the same window`,
-    });
-  }
-  return findings;
-}
-
-function tenureFindings(evidence: Evidence, payload: TenurePayload): Finding[] {
-  const findings: Finding[] = [];
-  const ids = [evidence.evidenceId];
-
-  if (payload.accountAgeDays >= 90 && payload.kycLevel >= 1) {
-    findings.push({
-      code: "history.established_account",
-      direction: "exculpatory",
-      weight: WEIGHTS.establishedAccount,
-      evidenceIds: ids,
-      summary: `account is ${payload.accountAgeDays} days old at KYC level ${payload.kycLevel}`,
-    });
-  }
-  if (payload.priorCapturedCount >= 3) {
-    findings.push({
-      code: "history.settled_payments",
-      direction: "exculpatory",
-      weight: WEIGHTS.settledHistory,
-      evidenceIds: ids,
-      summary: `${payload.priorCapturedCount} previously settled payments on this account`,
-    });
-  }
-  return findings;
-}
-
-export { THRESHOLDS, WEIGHTS };
+export { deriveFindings, FINDING_CODES, FINDING_DIRECTION } from "./findings.js";
+export type { Action, CostModel } from "./policy.js";
+export { DEFAULT_COSTS, decide, decisionBoundaries, realisedCostMinor } from "./policy.js";
