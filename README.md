@@ -325,6 +325,7 @@ the same screen.
 | `alerts` | What the upstream rules engine raises |
 | `investigate [alertId]` | Investigate an alert and seal a case artifact |
 | `replay <casePath>` | Re-execute a sealed case and verify integrity |
+| `sensitivity [--json <path>]` | Sweep the cost assumptions and re-price the decision |
 | `serve` | Run the console API |
 
 Optional model access for narration:
@@ -333,7 +334,87 @@ Optional model access for narration:
 cp .env.example .env   # then set GEMINI_API_KEY
 ```
 
+## Reproduce the headline results
+
+Requires Node.js 22 or later. Every command below runs offline; no API key is involved.
+
+```bash
+git clone https://github.com/gativarshney/casefile.git
+cd casefile
+npm ci
+```
+
+**Development world.** Deterministic from a frozen specification, so this reproduces the
+same `worldRoot` on any machine.
+
+```bash
+npm run casefile -- generate --out data/dev
+```
+
+```bash
+npm run casefile -- inspect --data data/dev
+```
+
+`inspect` ends in `ALL CHECKS PASSED` — the hardness criteria that make the rest of the
+numbers meaningful.
+
+**The model is already frozen.** `models/casefile.json` is committed and was never
+modified after its freeze commit, so nothing needs training to reproduce the results.
+`train` is available to *verify* the freeze: it refits on the development world and
+reproduces the committed coefficients.
+
+```bash
+npm run casefile -- train --data data/dev --out reports/refit.json
+```
+
+**Held-out world.** Generated from the same frozen specification under a different seed, a
+later window, disjoint identifiers, and two attack mechanisms absent from development. The
+specification and the model were both fixed before this world was first evaluated; the
+generator is deterministic, so regenerating it here reproduces that same world rather than
+drawing a new one.
+
+```bash
+npm run casefile -- generate --heldout --out data/heldout
+```
+
+```bash
+npm run casefile -- evaluate --data data/heldout
+```
+
+The report prints to the terminal; add `--json reports/heldout.json` to keep a copy.
+Generated worlds and reports stay untracked by design.
+
+**Expected headline figures** (held-out, blocking outright):
+
+| | Held-out | Development |
+|---|---|---|
+| Precision | 0.888 | 0.864 |
+| Recall | 0.831 | 0.848 |
+| F1 | 0.859 | 0.856 |
+| PR-AUC | 0.842 | 0.888 |
+| False-positive rate | 1.7% | 1.8% |
+
+Development figures come from `evaluate --data data/dev`. Both worlds are scored by the
+same frozen model; the held-out column is the documented result.
+
+**Expected known failures.** These are supposed to appear:
+
+- `abuse_ring/timing_only` — 0% alerted, 0% blocked (withheld mechanism)
+- `card_testing/slow_low` — 0% blocked (withheld mechanism)
+- `friendly_fraud/*` — effectively undetectable at authorisation time
+- End to end, 172 of 294 held-out frauds reach triage and 143 are blocked
+- `shared_household_device` hard negatives are wrongly blocked ~22% of the time
+
+**Cost assumptions.** The rupee figures depend on a stated cost model. Sweep it:
+
+```bash
+npm run casefile -- sensitivity --data data/dev
+```
+
 ## Repository layout
+
+[ARCHITECTURE.md](ARCHITECTURE.md) covers the engineering detail: why IRLS, why sign
+constraints, the boundary tests, the freeze protocol and the rejected alternatives.
 
 ```
 src/
@@ -353,7 +434,7 @@ src/
   cli/        the casefile command line interface
 web/          the investigation console
 tools/        offline reference-fixture generation, not part of the runtime
-tests/        252 tests: unit, property-based, end-to-end
+tests/        268 tests: unit, property-based, end-to-end
 ```
 
 ## Notes on the numerics
@@ -376,6 +457,21 @@ reference material only — Python is not a runtime dependency, and `npm test` c
 committed JSON without it.
 
 ## Limitations
+
+- **Card rails only.** The benchmark models card-not-present card payments: card records
+  with BIN, brand and last four, per-transaction AVS, CVV and 3-D Secure results, and
+  decline-reason composition. **UPI is not modelled. Netbanking is not modelled.
+  Wallet-specific payment evidence is not modelled** — `wallet_topup` appears only as a
+  *merchant category* funded by a card, not as a wallet rail. This is a scope limitation of
+  the current benchmark, not a claim that these rails behave like cards or that the probes
+  would transfer to them. Rail-specific evidence, failure modes and fraud mechanisms would
+  each need their own modelling and their own evaluation.
+- **Authentication is modelled at outcome level.** Transactions carry `avsResult`,
+  `cvvResult` and `threeDsResult`, each one of `pass`, `fail`, `unavailable` or
+  `not_requested`, and sessions carry auth events of kind `login`, `otp_challenge`,
+  `three_ds_challenge` or `password_reset` with a `success`, `failure` or `abandoned`
+  outcome. No cryptographic authentication protocol is implemented or simulated, and the
+  system performs no authentication of its own.
 
 - **Synthetic data.** Both worlds come from the same simulator. Independent draws with
   disjoint entities and withheld mechanisms make memorisation detectable, but they are not
