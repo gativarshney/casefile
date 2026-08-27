@@ -114,6 +114,17 @@ function cardTesting(
   const burstIp = variant === "burst" ? b.homeIp([...path, "ip"], rng, city) : null;
 
   const successIndex = attempts - rng.int(1, 3);
+  // Not every actor cashes out immediately. Waiting until the testing window has closed
+  // is an ordinary countermeasure, and it removes the strongest single signal — so a
+  // detector that leans only on "a capture among declines" misses these entirely.
+  const delayedMonetisation = rng.chance(3_500);
+  const monetisationDelayMs = delayedMonetisation ? rng.int(8, 30) * HOUR_MS : 0;
+  // A cautious actor works a narrower slice of the list, so issuer spread is thinner.
+  const binPoolSize = rng.weighted([
+    [3, 30],
+    [6, 40],
+    [12, 30],
+  ]);
   for (let a = 0; a < attempts; a += 1) {
     const attemptRng = b.stream(...path, "attempt", a);
     const atMs =
@@ -138,7 +149,7 @@ function cardTesting(
     });
 
     const card = b.addCard(
-      [...path, "card", a],
+      [...path, "card", a % binPoolSize],
       attemptRng,
       customerId,
       atMs - attemptRng.int(0, 620) * DAY_MS,
@@ -157,7 +168,7 @@ function cardTesting(
         cardId: card.cardId,
         merchantId: merchant.merchantId,
         sessionId: session.sessionId,
-        atMs,
+        atMs: succeeded ? atMs + monetisationDelayMs : atMs,
         amountMinor: succeeded
           ? attemptRng.lognormalInt(merchant.avgTicketMinor, 0.55, 2_000)
           : attemptRng.int(1, 6) * 100,
@@ -255,9 +266,12 @@ function accountTakeover(
     });
   }
 
-  const changes = rng
-    .shuffle(["email", "phone", "shipping_address"] as const)
-    .slice(0, rng.int(1, 2));
+  // Changing contact details first is common but not universal; an attacker in a hurry
+  // simply spends, leaving the profile untouched.
+  const changesProfile = rng.chance(6_000);
+  const changes = changesProfile
+    ? rng.shuffle(["email", "phone", "shipping_address"] as const).slice(0, rng.int(1, 2))
+    : [];
   for (const [i, field] of changes.entries()) {
     b.addProfileChange([...path, "change", i], {
       customerId: victim.customerId,
@@ -312,7 +326,13 @@ function abuseRing(
 ): void {
   const path = ["fraud", ctx.variant, n] as const;
   const rng = b.stream(...path);
-  const size = rng.int(3, 6);
+  // A disciplined operator runs a smaller cluster and lets it age, which looks far more
+  // like a household than a farm of freshly minted accounts.
+  const size = rng.weighted([
+    [2, 30],
+    [4, 45],
+    [6, 25],
+  ]);
   const activeFrom = rng.int(3, Math.max(4, b.spec.days - 10));
   // Rings farm accounts well ahead of use. The coordination signal is that a ring's
   // accounts are created within hours of *each other*; placing that cluster anywhere in

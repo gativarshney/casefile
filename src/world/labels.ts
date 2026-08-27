@@ -44,6 +44,7 @@ export const DecoyKind = z.enum([
   "travelling_customer",
   "vpn_user",
   "card_reissue",
+  "card_retry_after_declines",
   "gift_to_new_address",
   "first_purchase_high_value",
   "new_device_on_holiday",

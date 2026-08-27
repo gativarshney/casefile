@@ -34,6 +34,8 @@ export interface FraudCounts {
 export interface DecoyCounts {
   readonly vpnUsers: number;
   readonly cardReissues: number;
+  /** Genuine customers whose card is declined repeatedly before a payment succeeds. */
+  readonly retryAfterDeclines: number;
   readonly giftsToNewAddress: number;
   readonly firstPurchaseHighValue: number;
   readonly newDeviceOnHoliday: number;
@@ -114,18 +116,19 @@ export function developmentSpec(): WorldSpec {
       subscriber: 55,
     },
     fraud: {
-      cardTestingBurst: 30,
+      cardTestingBurst: 55,
       cardTestingSlowLow: 0,
-      atoCredentialStuffing: 28,
-      atoSessionHijack: 17,
-      ringSharedInfrastructure: 20,
+      atoCredentialStuffing: 60,
+      atoSessionHijack: 35,
+      ringSharedInfrastructure: 9,
       ringTimingOnly: 0,
-      friendlyBuyersRemorse: 40,
-      friendlyFamilyMember: 20,
+      friendlyBuyersRemorse: 45,
+      friendlyFamilyMember: 22,
     },
     decoys: {
       vpnUsers: 22,
       cardReissues: 20,
+      retryAfterDeclines: 60,
       giftsToNewAddress: 24,
       firstPurchaseHighValue: 22,
       newDeviceOnHoliday: 16,
@@ -158,18 +161,19 @@ export function heldoutSpec(): WorldSpec {
       subscriber: 30,
     },
     fraud: {
-      cardTestingBurst: 12,
-      cardTestingSlowLow: 8,
-      atoCredentialStuffing: 12,
-      atoSessionHijack: 8,
-      ringSharedInfrastructure: 10,
-      ringTimingOnly: 7,
+      cardTestingBurst: 26,
+      cardTestingSlowLow: 16,
+      atoCredentialStuffing: 28,
+      atoSessionHijack: 16,
+      ringSharedInfrastructure: 4,
+      ringTimingOnly: 3,
       friendlyBuyersRemorse: 22,
-      friendlyFamilyMember: 12,
+      friendlyFamilyMember: 11,
     },
     decoys: {
       vpnUsers: 12,
       cardReissues: 11,
+      retryAfterDeclines: 32,
       giftsToNewAddress: 13,
       firstPurchaseHighValue: 12,
       newDeviceOnHoliday: 9,
@@ -214,6 +218,7 @@ export function qualitySpec(): WorldSpec {
     decoys: {
       vpnUsers: 10,
       cardReissues: 9,
+      retryAfterDeclines: 26,
       giftsToNewAddress: 10,
       firstPurchaseHighValue: 9,
       newDeviceOnHoliday: 7,
@@ -253,6 +258,7 @@ export function testSpec(overrides: Partial<WorldSpec> = {}): WorldSpec {
     decoys: {
       vpnUsers: 3,
       cardReissues: 3,
+      retryAfterDeclines: 6,
       giftsToNewAddress: 3,
       firstPurchaseHighValue: 3,
       newDeviceOnHoliday: 2,

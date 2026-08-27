@@ -459,6 +459,7 @@ export function buildLegitimatePopulation(b: WorldBuilder): LegitimatePopulation
   persons.push(...buildVpnUsers(b));
   persons.push(...buildCardReissues(b));
   persons.push(...buildGiftSenders(b));
+  persons.push(...buildRetryAfterDeclines(b));
 
   for (const person of persons) {
     b.labelEntity("customer", person.customerId, "legitimate", null);
@@ -775,4 +776,84 @@ function buildGiftSenders(b: WorldBuilder): Person[] {
       };
     },
   );
+}
+
+/**
+ * A genuine customer whose card keeps being refused, then pays with another one.
+ *
+ * This is the hard negative for card testing: both produce a run of hard declines
+ * followed by a capture. What separates them is breadth — a real customer retries one
+ * or two of their own instruments, while an actor testing a stolen list moves across
+ * many issuers — so the verifier has to combine decline evidence with BIN spread and
+ * account history rather than reacting to the declines alone.
+ */
+function buildRetryAfterDeclines(b: WorldBuilder): Person[] {
+  const persons: Person[] = [];
+  for (let index = 0; index < b.spec.decoys.retryAfterDeclines; index += 1) {
+    const person = setupPerson(b, "retry_customer", index, { cards: [2, 3] });
+    const rng = b.stream(...person.path, "life");
+
+    runPurchaseLife(b, person, {
+      purchases: scaled(b.spec, [6, 16], rng),
+      mix: CASUAL_MIX,
+      factor: [0.8, 1.3],
+    });
+
+    const day = rng.int(2, b.spec.days - 2);
+    const startMs = b.sampleDayTime(rng, b.spec.startAtMs + day * DAY_MS);
+    const merchant = rng.pick(
+      b.merchantsIn(["electronics", "wallet_topup", "gift_cards", "travel"]),
+    );
+    const attempts = rng.int(4, 7);
+    const failingCard = b.cardsAvailableAt(person.cardIds, startMs)[0];
+    if (!failingCard) continue;
+
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const attemptRng = b.stream(...person.path, "retry", attempt);
+      const atMs = startMs + attempt * attemptRng.int(40, 200) * 1_000;
+      const succeeded = attempt === attempts - 1;
+      const usable = b.cardsAvailableAt(person.cardIds, atMs);
+      const cardId = succeeded ? (usable[usable.length - 1] as string) : failingCard;
+
+      const session = b.addSession([...person.path, "retry-session", attempt], {
+        customerId: person.customerId,
+        deviceId: attemptRng.pick(person.deviceIds),
+        ipId: person.homeIpId,
+        startedAtMs: atMs - attemptRng.int(2, 12) * MINUTE_MS,
+        endedAtMs: atMs + attemptRng.int(1, 8) * MINUTE_MS,
+        channel: person.channel,
+      });
+
+      b.addTransaction(
+        [...person.path, "retry-txn", attempt],
+        {
+          customerId: person.customerId,
+          cardId,
+          merchantId: merchant.merchantId,
+          sessionId: session.sessionId,
+          atMs,
+          amountMinor: attemptRng.lognormalInt(merchant.avgTicketMinor, 0.4, 5_000),
+          status: succeeded ? "captured" : "declined",
+          declineReason: succeeded
+            ? null
+            : attemptRng.weighted([
+                ["expired_card", 40],
+                ["do_not_honour", 35],
+                ["invalid_card", 15],
+                ["insufficient_funds", 10],
+              ]),
+          avsResult: attemptRng.weighted([
+            ["pass", 70],
+            ["unavailable", 30],
+          ]),
+          cvvResult: "pass",
+          threeDsResult: "not_requested",
+          shippingCity: null,
+        },
+        { isFraud: false, archetype: "retry_customer", decoyKind: "card_retry_after_declines" },
+      );
+    }
+    persons.push(person);
+  }
+  return persons;
 }
