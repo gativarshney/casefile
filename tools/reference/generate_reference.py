@@ -84,7 +84,8 @@ def build_cases() -> list[dict]:
 
 def main() -> None:
     cases = build_cases()
-    OUTPUT.write_text(json.dumps({"cases": cases}, indent=None) + "\n", encoding="utf-8")
+    with OUTPUT.open("w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps({"cases": cases}, indent=None) + "\n")
     print(f"wrote {len(cases)} cases to {OUTPUT.name}")
     for case in cases:
         print(
