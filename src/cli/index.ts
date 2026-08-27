@@ -9,6 +9,8 @@ import { evaluate } from "../eval/evaluate.js";
 import { formatReport, inspectWorld } from "../eval/inspect.js";
 import { formatEvaluation } from "../eval/report.js";
 import { buildTrainingSet, trainModel, writeModel } from "../eval/train.js";
+import { narrateCase } from "../llm/narrate.js";
+import { providerFromEnvironment } from "../llm/provider.js";
 import { ReplayMismatchError, replayCase } from "../replay/replay.js";
 import { type FrozenModel, loadModel } from "../scoring/model.js";
 import { decisionBoundaries } from "../verify/policy.js";
@@ -166,23 +168,36 @@ program
   .option("-d, --data <directory>", "world directory", DEFAULT_DATA_DIR)
   .option("-m, --model <path>", "frozen model", DEFAULT_MODEL_PATH)
   .option("-o, --out <directory>", "case output directory", "artifacts")
-  .action((alertId: string | undefined, options: { data: string; model: string; out: string }) => {
-    const model = requireModel(options.model);
-    const { reader, manifest } = openWorld(options.data);
-    try {
-      const alerts = raiseAlerts(reader);
-      const alert = alertId ? alerts.find((a) => a.alertId === alertId) : alerts[0];
-      if (!alert) throw new Error(alertId ? `no such alert: ${alertId}` : "no alerts were raised");
+  .action(
+    async (alertId: string | undefined, options: { data: string; model: string; out: string }) => {
+      const model = requireModel(options.model);
+      const { reader, manifest } = openWorld(options.data);
+      let artifact: CaseArtifact;
+      try {
+        const alerts = raiseAlerts(reader);
+        const alert = alertId ? alerts.find((a) => a.alertId === alertId) : alerts[0];
+        if (!alert)
+          throw new Error(alertId ? `no such alert: ${alertId}` : "no alerts were raised");
+        artifact = investigate(reader, manifest, alert, model);
+      } finally {
+        reader.close();
+      }
 
-      const artifact = investigate(reader, manifest, alert, model);
       const path = join(options.out, `${artifact.caseId}.json`);
       writeCase(path, artifact);
       printCase(artifact);
+
+      // Narration describes a decision that is already sealed. It is generated after the
+      // fact and never written back, so no model output can influence the verdict.
+      const narration = await narrateCase(artifact, providerFromEnvironment());
+      process.stdout.write(`\n  SUMMARY (${narration.source})\n`);
+      for (const line of wrapText(narration.text, 72)) process.stdout.write(`    ${line}\n`);
+      for (const rejected of narration.rejected) {
+        process.stdout.write(`    [dropped: ${rejected.reason}]\n`);
+      }
       process.stdout.write(`\nsealed to ${path}\n`);
-    } finally {
-      reader.close();
-    }
-  });
+    },
+  );
 
 program
   .command("replay")
@@ -203,6 +218,21 @@ program
       reader.close();
     }
   });
+
+function wrapText(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let current = "";
+  for (const word of text.split(" ")) {
+    if (current.length + word.length + 1 > width) {
+      lines.push(current);
+      current = word;
+    } else {
+      current = current.length === 0 ? word : `${current} ${word}`;
+    }
+  }
+  if (current.length > 0) lines.push(current);
+  return lines;
+}
 
 function printCase(artifact: CaseArtifact): void {
   const probability = Number(artifact.fraudProbability);
