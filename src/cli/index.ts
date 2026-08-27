@@ -6,7 +6,7 @@ import { Command } from "commander";
 import { raiseAlerts } from "../alerting/rules.js";
 import { type CaseArtifact, investigate, readCase, writeCase } from "../case/artifact.js";
 import { ReplayMismatchError, replayCase } from "../replay/replay.js";
-import { generateWorld } from "../world/generate.js";
+import { developmentSpec, generateWorld } from "../world/generate/index.js";
 import { type DatasetManifest, IntegrityError, WorldReader } from "../world/store.js";
 
 const packageJson = JSON.parse(
@@ -29,16 +29,16 @@ const program = new Command()
 
 program
   .command("generate")
-  .description("Generate a synthetic payment world from a seed")
-  .option("-s, --seed <number>", "generator seed", "20250106")
+  .description("Generate the synthetic development payment world")
   .option("-o, --out <directory>", "output directory", DEFAULT_DATA_DIR)
-  .action((options: { seed: string; out: string }) => {
-    const result = generateWorld({ seed: Number(options.seed), outputDirectory: options.out });
+  .action((options: { out: string }) => {
+    const result = generateWorld({ spec: developmentSpec(), outputDirectory: options.out });
     process.stdout.write(`world      ${result.worldPath}\n`);
+    process.stdout.write(`labels     ${result.labelsPath}\n`);
     process.stdout.write(`manifest   ${result.manifestPath}\n`);
     process.stdout.write(`world root ${result.manifest.worldRoot}\n`);
     for (const [table, count] of Object.entries(result.counts)) {
-      process.stdout.write(`  ${table.padEnd(14)}${count}\n`);
+      process.stdout.write(`  ${table.padEnd(18)}${count}\n`);
     }
   });
 

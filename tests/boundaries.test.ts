@@ -9,7 +9,7 @@
  * so it cannot quietly become a no-op if a module is renamed.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
@@ -141,7 +141,25 @@ describe("the real source tree", () => {
   });
 
   it("the generator is allowed to import the store, but not the reverse", () => {
-    const generator = readFileSync(join(SOURCE_ROOT, "world", "generate.ts"), "utf8");
+    const generator = readFileSync(join(SOURCE_ROOT, "world", "generate", "index.ts"), "utf8");
     expect(importSpecifiers(generator).some((s) => s.includes("store"))).toBe(true);
+  });
+
+  it("the world store carries no dependency on the answer key", () => {
+    const source = readFileSync(join(SOURCE_ROOT, "world", "store.ts"), "utf8");
+    expect(importSpecifiers(source).some((s) => s.includes("labels"))).toBe(false);
+  });
+
+  it("labels and the generator are reachable only from generation and evaluation", () => {
+    const allowed = ["world/generate", "eval", "cli"];
+    const offenders: string[] = [];
+    for (const pkg of ["canon", "reference", "alerting", ...INVESTIGATION_PACKAGES]) {
+      for (const file of typescriptFilesIn(join(SOURCE_ROOT, pkg))) {
+        const relative = file.replace(SOURCE_ROOT, "").split(sep).join("/");
+        if (allowed.some((prefix) => relative.includes(prefix))) continue;
+        if (violations(readFileSync(file, "utf8")).length > 0) offenders.push(relative);
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });
