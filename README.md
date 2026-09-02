@@ -2,17 +2,17 @@
 
 **An investigating verifier for payment fraud alerts.**
 
-Razorpay AI Buildathon — **Track 02: AI Risk Manager**.
+Razorpay AI Buildathon, **Track 02: AI Risk Manager**.
 
 A rules engine tells you a transaction is suspicious. It does not tell you whether it is
 *right*. Casefile investigates the alert: it gathers evidence from the payment
 environment, weighs it, and returns an auditable verdict where every claim traces to a
-specific record — and where changing any record underneath that verdict makes replay
+specific record, and where changing any record underneath that verdict makes replay
 fail loudly instead of quietly lying to you.
 
 **Scope.** A read-only verifier over synthetic data. It decides whether an alert is
 supported by the evidence and shows its working. It contains nothing that could commit
-fraud, evade a control, or act on a live system — defence-only by construction.
+fraud, evade a control, or act on a live system. Defence-only by construction.
 
 **Start here:** [reproduce the headline results](#reproduce-the-headline-results) ·
 [run the console](#the-console) · [what it gets wrong](#what-it-gets-wrong) ·
@@ -25,7 +25,7 @@ fraud, evade a control, or act on a live system — defence-only by construction
 Production fraud rules engines are tuned for recall, so they over-alert. A risk
 analyst's day goes on clearing alerts that were never fraud. The cost is two-sided:
 every false positive is a rejected customer, and every alert rubber-stamped because the
-queue is 400 deep is a loss that got through.
+queue is large and analysts cannot investigate every one is a loss that got through.
 
 Casefile sits *after* the rules engine. Its job is triage: given an alert, decide whether
 the evidence actually supports it, and show its working.
@@ -47,15 +47,16 @@ Measured once on a held-out world, after the model was frozen. Full methodology 
 | False-positive rate | 1.7% | 1.8% |
 
 Development and held-out agree to within 0.003 F1 on worlds that share no customer, card,
-device, session or transaction — which is the evidence that the model generalises rather
+device, session or transaction, which is the evidence that the model generalises rather
 than memorises.
 
 **Cost.** Sending every alert to an analyst costs ₹4,73,027 on this world. Triage costs
-₹1,67,137 — a **64.7% reduction**, with 85.2% of alerts auto-decided and 154 analyst
+₹1,67,137, a **64.7% reduction**, with 85.2% of alerts auto-decided and 154 analyst
 hours returned.
 
-**Calibration.** Brier 0.041, expected calibration error 0.040. A case scored at 72% is
-fraud about 72% of the time; the probability is meant literally.
+**Calibration.** Brier 0.041, expected calibration error 0.040. Calibration is strong in
+aggregate and particularly at the high-confidence end where most decisions concentrate,
+while sparse mid-range bins remain noisier.
 
 ### Baselines
 
@@ -94,7 +95,7 @@ authorisation time. The dispute arrives weeks later, and the verifier is forbidd
 reading it (see *Authorisation-time cutoff*).
 
 **Both withheld attack mechanisms defeated the system completely.** `timing_only` rings
-share no device, address or instrument — only coordinated timing — and never trip the
+share no device, address or instrument (only coordinated timing) and never trip the
 alerting layer at all. `slow_low` card testing spreads the same attack across days and
 rotating devices, so density carries no signal. Neither appears anywhere in the
 development world; both were withheld precisely to test whether the system generalises to
@@ -103,7 +104,7 @@ convenient one would have been: it locates the failure at the *alerting* layer r
 than in triage, and says what would have to change.
 
 **Hard negatives still produce false positives.** Households sharing a device are wrongly
-blocked 22% of the time — the single largest source of customer harm in the system.
+blocked 22% of the time, the single largest source of customer harm in the system.
 
 ## How it decides
 
@@ -127,7 +128,7 @@ verifier.
 
 **The score is a sign-constrained logistic regression.** Every finding declares whether it
 argues for or against fraud, and the fitted coefficient is constrained to agree. Without
-that constraint, collinear evidence flips signs — card testing always shows both a spread
+that constraint, collinear evidence flips signs: card testing always shows both a spread
 of issuers *and* a wall of hard declines, so an unconstrained fit happily loads one and
 subtracts the other. The likelihood barely notices; a reviewer told that hard declines
 *reduce* risk stops trusting the system immediately. Constraining costs a little
@@ -138,8 +139,8 @@ log-likelihood and buys monotonicity.
 the system used. A test asserts this.
 
 **The thresholds are derived, not chosen.** Given a calibrated probability and an explicit
-cost model — chargeback fee, goods lost, margin forgone, goodwill damage from a wrong
-block, analyst time — the policy takes whichever action has the lowest expected cost. The
+cost model (chargeback fee, goods lost, margin forgone, goodwill damage from a wrong
+block, analyst time), the policy takes whichever action has the lowest expected cost. The
 bar for blocking falls as the amount rises, because the loss from letting fraud through
 scales with value while the cost of a wrong block does not.
 
@@ -165,7 +166,7 @@ evidence moved underneath the case; `ReplayMismatchError` means the records are 
 Casefile itself changed.
 
 **Tamper detection recomputes every hash from live row fields.** The `record_hash` column
-stored beside the data is never trusted — anyone who can rewrite a row can rewrite that
+stored beside the data is never trusted: anyone who can rewrite a row can rewrite that
 column too, so a fully self-consistent forgery still fails.
 
 ## The synthetic environment
@@ -197,9 +198,9 @@ on its own, checks that fraud timing is within sampling noise of legitimate traf
 that no entity-graph component is large enough to make splits meaningless, and that no
 dispute precedes its own transaction.
 
-That command found six real synthetic tells during development — device age, account age,
+That command found six real synthetic tells during development: device age, account age,
 card age, session duration, merchant category and hour-of-day were all separating the
-classes on their own — and each was fixed at the source rather than papered over. It now
+classes on their own. Each was fixed at the source rather than papered over. It now
 passes on both worlds with **no single field above 0.69 separation**.
 
 ## Evaluation methodology
@@ -218,7 +219,7 @@ indistinguishable pool so nothing about an id reveals what produced it, in which
 with which role.
 
 **Within development, the training split is entity-disjoint too.** Folds are assigned by
-connected component over strong links — a shared device or a shared payment instrument —
+connected component over strong links (a shared device or a shared payment instrument),
 so a customer, a household and a whole fraud ring land wholly on one side. A random split
 by transaction would let the calibration fold measure memorisation.
 
@@ -240,7 +241,7 @@ reaches them. The checker is itself tested against a deliberate violation so it 
 quietly become a no-op.
 
 **The held-out world was evaluated once.** Nothing about the generator, the probes, the
-features or the model changed afterwards. End-to-end reporting was added after that run —
+features or the model changed afterwards. End-to-end reporting was added after that run:
 it changed what is *reported*, not what the system does, and both worlds were re-reported
 with the same frozen model.
 
@@ -255,7 +256,7 @@ Ungrounded sentences are dropped and reported as dropped, so the failure is visi
 than silent.
 
 **With no API key configured** the narrator falls back to a template assembled from
-findings — grounded by construction. Install, build, test, evaluate, replay and the entire
+findings, grounded by construction. Install, build, test, evaluate, replay and the entire
 demo run offline. Nothing in the measured results depends on a model being reachable.
 
 **Attacker-controlled text is contained.** Checkout descriptions are written by whoever
@@ -269,7 +270,7 @@ legitimate` is blocked at 73.7%, with the injection attempt listed among the fin
 
 ## Getting started
 
-Requires **Node.js 22 or later**. Nothing else — no Python, no C++ toolchain, no API key.
+Requires **Node.js 22 or later**. Nothing else: no Python, no C++ toolchain, no API key.
 
 ```bash
 npm install
@@ -320,7 +321,7 @@ npm run web
 ```
 
 The queue is on the left. Opening an alert seals a case and shows the verdict, each
-finding with its exact log-odds contribution, and — behind every finding — the evidence
+finding with its exact log-odds contribution, and behind every finding the evidence
 payload and the source records it was derived from, each with its hash. Replay runs from
 the same screen.
 
@@ -365,7 +366,7 @@ npm run casefile -- generate --out data/dev
 npm run casefile -- inspect --data data/dev
 ```
 
-`inspect` ends in `ALL CHECKS PASSED` — the hardness criteria that make the rest of the
+`inspect` ends in `ALL CHECKS PASSED`, the hardness criteria that make the rest of the
 numbers meaningful.
 
 **The model is already frozen.** `models/casefile.json` is committed and was never
@@ -409,9 +410,9 @@ same frozen model; the held-out column is the documented result.
 
 **Expected known failures.** These are supposed to appear:
 
-- `abuse_ring/timing_only` — 0% alerted, 0% blocked (withheld mechanism)
-- `card_testing/slow_low` — 0% blocked (withheld mechanism)
-- `friendly_fraud/*` — effectively undetectable at authorisation time
+- `abuse_ring/timing_only`: 0% alerted, 0% blocked (withheld mechanism)
+- `card_testing/slow_low`: 0% blocked (withheld mechanism)
+- `friendly_fraud/*`: effectively undetectable at authorisation time
 - End to end, 172 of 294 held-out frauds reach triage and 143 are blocked
 - `shared_household_device` hard negatives are wrongly blocked ~22% of the time
 
@@ -450,20 +451,20 @@ tests/        268 tests: unit, property-based, end-to-end
 ## Notes on the numerics
 
 The scorer is L2-regularised logistic regression fitted by **iteratively reweighted least
-squares** — Newton's method, converging quadratically in under a dozen iterations.
+squares**, Newton's method, converging quadratically in under a dozen iterations.
 Gradient descent was measured first and left coefficients still moving after thousands of
 steps, which would have made them a function of the iteration count rather than of the
 data. Sign constraints are handled by an **active-set projected Newton** solver: naive
 clamping lets a coefficient oscillate across its boundary and never settle.
 
-The implementation is validated against **scikit-learn** on five adversarial cases —
+The implementation is validated against **scikit-learn** on five adversarial cases:
 twenty correlated features, a 3% base rate, perfectly separable data, collinear data, and
 the one-dimensional Platt fit. Predicted probabilities agree to under `1e-5`, and where
 coefficients differ at the `1e-6` level this implementation reaches a **strictly lower
 objective**: Newton converges quadratically where L-BFGS stops short.
 
 `tools/reference/generate_reference.py` regenerates that comparison fixture offline. It is
-reference material only — Python is not a runtime dependency, and `npm test` consumes the
+reference material only. Python is not a runtime dependency, and `npm test` consumes the
 committed JSON without it.
 
 ## Limitations
@@ -471,7 +472,7 @@ committed JSON without it.
 - **Card rails only.** The benchmark models card-not-present card payments: card records
   with BIN, brand and last four, per-transaction AVS, CVV and 3-D Secure results, and
   decline-reason composition. **UPI is not modelled. Netbanking is not modelled.
-  Wallet-specific payment evidence is not modelled** — `wallet_topup` appears only as a
+  Wallet-specific payment evidence is not modelled**. `wallet_topup` appears only as a
   *merchant category* funded by a card, not as a wallet rail. This is a scope limitation of
   the current benchmark, not a claim that these rails behave like cards or that the probes
   would transfer to them. Rail-specific evidence, failure modes and fraud mechanisms would
@@ -487,8 +488,8 @@ committed JSON without it.
   disjoint entities and withheld mechanisms make memorisation detectable, but they are not
   a substitute for production traffic.
 - **Prototype, not production.** A local SQLite file, a single process, and a batch
-  evaluation. The architecture — probes as pure functions, evidence with provenance,
-  frozen models, sealed artifacts — is production-shaped, but nothing here has run at
+  evaluation. The architecture (probes as pure functions, evidence with provenance,
+  frozen models, sealed artifacts) is production-shaped, but nothing here has run at
   scale or under adversarial pressure.
 - **Friendly fraud is out of reach** at authorisation time, by construction.
 - **Novel mechanisms defeat the pipeline**, and the failure is at the alerting layer
