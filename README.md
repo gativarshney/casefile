@@ -2,11 +2,21 @@
 
 **An investigating verifier for payment fraud alerts.**
 
+Razorpay AI Buildathon — **Track 02: AI Risk Manager**.
+
 A rules engine tells you a transaction is suspicious. It does not tell you whether it is
 *right*. Casefile investigates the alert: it gathers evidence from the payment
 environment, weighs it, and returns an auditable verdict where every claim traces to a
 specific record — and where changing any record underneath that verdict makes replay
 fail loudly instead of quietly lying to you.
+
+**Scope.** A read-only verifier over synthetic data. It decides whether an alert is
+supported by the evidence and shows its working. It contains nothing that could commit
+fraud, evade a control, or act on a live system — defence-only by construction.
+
+**Start here:** [reproduce the headline results](#reproduce-the-headline-results) ·
+[run the console](#the-console) · [what it gets wrong](#what-it-gets-wrong) ·
+[architecture](ARCHITECTURE.md)
 
 ---
 
