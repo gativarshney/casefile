@@ -14,6 +14,8 @@ fail loudly instead of quietly lying to you.
 supported by the evidence and shows its working. It contains nothing that could commit
 fraud, evade a control, or act on a live system. Defence-only by construction.
 
+**Demo.** [Watch the 4-minute pitch video](https://youtu.be/3zjhhkOCf2U?si=-zKswXulCeINr5fD)
+
 **Start here:** [reproduce the headline results](#reproduce-the-headline-results) ·
 [run the console](#the-console) · [what it gets wrong](#what-it-gets-wrong) ·
 [architecture](ARCHITECTURE.md)
